@@ -2,6 +2,8 @@
 import datetime as dt
 import os
 import threading
+import queue
+from chat import ChatService, OllamaProvider
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from pathlib import Path
@@ -14,10 +16,12 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS Lab · Asistente docente local (v0.1)')
+        self.title('AulaOS · Desarrollo interno 0.2')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
+        self.chat_service=ChatService(self.store)
+        self.chat_busy=False;self.chat_results=queue.Queue()
         self.gid=None;self.select_student=None
         self.group_ids={}
         self._style()
@@ -38,7 +42,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  LAB 0.1 · PRIVADO · OFFLINE',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.2 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -53,8 +57,10 @@ class AulaOS(tk.Tk):
         self.tab_att=ttk.Frame(self.tabs,padding=12);self.tab_notes=ttk.Frame(self.tabs,padding=12)
         self.tab_tasks=ttk.Frame(self.tabs,padding=12);self.tab_chat=ttk.Frame(self.tabs,padding=12)
         self.tabs.add(self.tab_att,text='    Pase de lista    ');self.tabs.add(self.tab_notes,text='    Historial y observaciones    ')
-        self.tabs.add(self.tab_tasks,text='    Pendientes    ');self.tabs.add(self.tab_chat,text='    Consultas locales    ')
+        self.tabs.add(self.tab_tasks,text='    Pendientes    ');self.tabs.add(self.tab_chat,text='    Asistente    ')
         self._attendance();self._notes();self._tasks();self._chat()
+        self.tabs.select(self.tab_chat)
+        self.after(100,self.poll_chat)
         self.status=tk.StringVar(value='Preparado. Los datos se guardan en tu computadora.')
         ttk.Label(self,textvariable=self.status,foreground='#4c6174',padding=(18,6)).pack(anchor='w')
     def _attendance(self):
@@ -103,13 +109,17 @@ class AulaOS(tk.Tk):
         ttk.Button(self.tab_tasks,text='Alternar realizada / pendiente',command=self.toggle_task).pack(side='left')
         ttk.Button(self.tab_tasks,text='Crear respaldo local',command=self.backup_now).pack(side='right')
     def _chat(self):
-        ttk.Label(self.tab_chat,text='Asistente de consultas local (reglas verificables; todavía NO es un modelo de IA).',foreground='#476682').pack(anchor='w',pady=6)
+        ttk.Label(self.tab_chat,text='Conversación guardada por escuela y grupo. IA local opcional; consultas básicas disponibles sin modelo.',foreground='#476682').pack(anchor='w',pady=6)
+        config=ttk.Frame(self.tab_chat);config.pack(fill='x')
+        ttk.Label(config,text='Modelo Ollama local (vacío: consultas básicas):').pack(side='left')
+        self.chat_model=tk.StringVar()
+        ttk.Entry(config,textvariable=self.chat_model,width=28).pack(side='left',padx=8)
         self.chatlog=tk.Text(self.tab_chat,font=('Segoe UI',11),wrap='word',state='disabled')
         self.chatlog.pack(fill='both',expand=True,pady=7)
         row=ttk.Frame(self.tab_chat);row.pack(fill='x',pady=6)
         self.chat_msg=tk.StringVar();ent=ttk.Entry(row,textvariable=self.chat_msg)
         ent.pack(side='left',fill='x',expand=True,padx=(0,8));ent.bind('<Return>',lambda e:self.ask())
-        ttk.Button(row,text='Consultar',command=self.ask).pack(side='left')
+        self.chat_send=ttk.Button(row,text='Enviar',command=self.ask);self.chat_send.pack(side='left')
         self.append_chat('AulaOS','Puedes preguntar: «¿Cuántas faltas lleva [nombre]?», «Historial de [nombre]» o «Pendientes».')
     def close(self):
         try:self.store.backup()
@@ -134,6 +144,7 @@ class AulaOS(tk.Tk):
         self.group_change()
     def group_change(self):
         self.gid=self.group_ids.get(self.group_box.get());self.refresh_students();self.load_tasks()
+        self.load_chat()
     def refresh_students(self):
         self.stree.delete(*self.stree.get_children());self.students_by_name={}
         if self.gid is None:return
@@ -267,10 +278,38 @@ class AulaOS(tk.Tk):
         if task:self.store.task_done(tid,not task['done']);self.load_tasks()
     def append_chat(self,who,msg):
         self.chatlog.configure(state='normal');self.chatlog.insert('end',f'{who}:\n{msg}\n\n');self.chatlog.see('end');self.chatlog.configure(state='disabled')
+    def load_chat(self):
+        self.chatlog.configure(state='normal');self.chatlog.delete('1.0','end');self.chatlog.configure(state='disabled')
+        for item in self.chat_service.history(self.gid):
+            label='Docente' if item['role']=='user' else 'AulaOS'
+            if item['state']!='complete':label+=' · '+item['state']
+            self.append_chat(label,item['content'])
     def ask(self):
         question=self.chat_msg.get().strip()
-        if not question:return
-        self.chat_msg.set('');self.append_chat('Docente',question)
-        self.append_chat('AulaOS',self.store.consult(self.gid,question))
+        if not question or self.chat_busy:return
+        gid=self.gid;model=self.chat_model.get().strip()
+        self.chat_busy=True;self.chat_send.configure(state='disabled');self.chat_msg.set('')
+        self.append_chat('Docente',question);self.toast('Procesando en el contexto seleccionado…')
+        def work():
+            store=None
+            try:
+                store=Store(DB_FILE)
+                answer=ChatService(store).send(gid,question,OllamaProvider(model) if model else None)
+                self.chat_results.put((gid,answer,None))
+            except Exception as exc:self.chat_results.put((gid,None,str(exc)))
+            finally:
+                if store is not None:store.close()
+        threading.Thread(target=work,daemon=True).start()
+    def poll_chat(self):
+        try:
+            gid,answer,error=self.chat_results.get_nowait()
+        except queue.Empty:pass
+        else:
+            self.chat_busy=False;self.chat_send.configure(state='normal')
+            if gid==self.gid:self.load_chat()
+            if error:self.toast('No se pudo responder: '+error)
+            elif gid!=self.gid:self.toast('Respuesta guardada en el grupo de origen.')
+            else:self.toast('Respuesta guardada localmente.')
+        self.after(100,self.poll_chat)
 
 if __name__=='__main__':AulaOS().mainloop()
