@@ -48,7 +48,9 @@ class ChatTests(unittest.TestCase):
             def log_message(self,*args):pass
         server=HTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
-            p=OllamaProvider('modelo',f'http://127.0.0.1:{server.server_port}')
+            p=OllamaProvider('modelo',f'http://127.0.0.1:{server.server_port}',options={'temperature':0},think=False)
             self.assertEqual(p.respond([{'role':'user','content':'hola'}]),'ok')
             self.assertEqual(received[0][0],'/api/chat');self.assertFalse(received[0][1]['stream'])
+            self.assertEqual(received[0][1]['options'],{'temperature':0})
+            self.assertFalse(received[0][1]['think'])
         finally:server.shutdown();server.server_close();thread.join()

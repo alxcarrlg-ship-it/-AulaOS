@@ -5,15 +5,18 @@ from urllib.parse import urlparse
 from core import now
 
 class OllamaProvider:
-    def __init__(self, model, endpoint='http://127.0.0.1:11434', timeout=90):
+    def __init__(self, model, endpoint='http://127.0.0.1:11434', timeout=90, options=None, think=None):
         parsed=urlparse(endpoint)
         if parsed.scheme != 'http' or parsed.hostname not in ('localhost','127.0.0.1','::1') or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment:
             raise ValueError('Esta integración solo admite un servidor de IA local')
         if not model.strip():raise ValueError('Selecciona un modelo local')
-        self.model=model.strip();self.endpoint=endpoint.rstrip('/');self.timeout=timeout
+        self.model=model.strip();self.endpoint=endpoint.rstrip('/');self.timeout=timeout;self.options=options;self.think=think
 
     def respond(self,messages):
-        body=json.dumps({'model':self.model,'messages':messages,'stream':False}).encode()
+        payload={'model':self.model,'messages':messages,'stream':False}
+        if self.options is not None:payload['options']=self.options
+        if self.think is not None:payload['think']=self.think
+        body=json.dumps(payload).encode()
         req=Request(self.endpoint+'/api/chat',data=body,headers={'Content-Type':'application/json'})
         with urlopen(req,timeout=self.timeout) as response:
             data=json.loads(response.read(4*1024*1024))
