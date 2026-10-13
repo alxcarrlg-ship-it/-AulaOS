@@ -1,0 +1,2 @@
+openpyxl>=3.1,<4
+# sounddevice (opcional: grabación local de notas de voz)
