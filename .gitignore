@@ -5,3 +5,6 @@ __pycache__/
 backups/
 *.wav
 .env
+
+*.dpapi
+settings.json

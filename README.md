@@ -1,17 +1,32 @@
 # AulaOS
 
-Asistente docente inteligente para Windows, en desarrollo.
+Asistente docente para Windows, en desarrollo. Incremento interno **0.3**: materiales locales conectados al chat. No hay un instalador validado ni se exige que el usuario final instale Python.
 
-## Estado verificable
+## Funciones implementadas
 
-Se recuperó AulaOS Lab 0.1 y se incorporó su núcleo y su interfaz al repositorio. La base es un laboratorio interno, no una entrega final. La implementación anterior de 0.2 no se localizó; las correcciones actuales continúan desde la 0.1 real.
+- Asistencia, observaciones, pendientes, importación de listas Excel/CSV, conflictos, exportación HTML y respaldo SQLite.
+- Conversaciones persistentes separadas por escuela/grupo; modo básico disponible sin internet ni modelos grandes.
+- Integración OpenAI Responses, selección de perfil, límite mensual de intentos, estimaciones por tokens y reintentos manuales. API con facturación independiente de ChatGPT.
+- Materiales por grupo: importar TXT, Markdown, CSV, DOCX y XLSX, revisar texto, buscar por título, guardar fragmentos y exportar texto Markdown.
+- Adjuntar hasta tres materiales por consulta. Las fuentes se identifican como `[Mnumero]`; el modelo recibe instrucciones de citarlas, sin garantía automática de exactitud.
+- Guardar la última respuesta como material y retomarla después. Los textos importados quedan disponibles aunque el archivo original cambie o desaparezca.
 
-Se conservan asistencia, observaciones, pendientes, lectura Excel/CSV, conflictos, exportación HTML y respaldo SQLite. Corregidos dos errores de integridad: escrituras entre grupos y reasignación de identidad al ordenar CSV. Las 17 pruebas del núcleo y chat pasan en Linux.
+## Privacidad y límites
 
-Avance interno 0.2: conversación persistente por grupo, pestaña de asistente como entrada principal, ejecución de respuestas fuera del hilo de interfaz y adaptador de chat local Ollama. El modo básico sigue disponible sin modelo. El adaptador se verificó con servidor de ensayo; no se ha ejecutado un modelo real ni validado la interfaz en Windows. Faltan selección e integración del motor distribuido, calidad conversacional medida, ejecución de herramientas, transcripción, acceso documental ampliado, investigación web, herramientas adaptables y validación del instalador en Windows. El usuario final no deberá instalar Python. No existe una versión instalable validada.
+Los originales no se modifican. Se guarda el texto extraído en SQLite; no se preserva el diseño Word/Excel ni se ejecutan macros o fórmulas. Los archivos se eligen manualmente: no hay exploración automática del disco. Importar no envía documentos a OpenAI. Enviar una consulta online incluye los adjuntos seleccionados y el historial online del grupo, que puede contener información de documentos previamente usados. Los registros escolares se incluyen solo al activar su opción en la interfaz.
 
-La auditoría y criterios de aceptación están en docs/AUDITORIA.md. El código recuperado se conserva en lab/. La base de datos real permanece local, fuera del repositorio.
+Credencial de sesión o guardado opcional mediante DPAPI de Windows; no se distribuye una clave compartida. `store: false` en la solicitud no promete retención cero del proveedor. El límite local cuenta intentos, no garantiza un máximo de dinero. Los fallos con consumo desconocido se muestran como tal.
+
+El modo sin conexión permite consultar registros, leer y guardar materiales. No resume documentos con IA. Investigación web, transcripción, edición DOCX/PPTX preservando formato y herramientas de escritura automáticas no están implementadas.
+
+## Verificación
+
+49 pruebas de lógica/datos: 48 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados y formatos documentales. Compilación sintáctica correcta. Las llamadas a OpenAI se simulan; falta validación real con credencial. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+
+Por acuerdo del usuario, las comprobaciones de Windows, interfaz en ese sistema, rendimiento en PC básica e instalador quedan como requisitos de la versión **1.0**. No bloquean los incrementos de desarrollo 0.x.
 
 ## Desarrollo interno
 
-El laboratorio usa Python, tkinter y SQLite. Esto no impone Python al usuario final ni fija la arquitectura definitiva. Para verificar el núcleo en un entorno de desarrollo: instalar lab/requirements.txt y ejecutar desde lab/: `python -m unittest discover -s tests -v`.
+Python, tkinter, SQLite y openpyxl. Desde `lab/`, con dependencias de `requirements.txt` instaladas: `python -m unittest discover -s tests -v`.
+
+Ver [alcance y comprobaciones de 0.3](docs/VERSION_0_3.md) y [arquitectura online/offline](docs/ARQUITECTURA_ONLINE_OFFLINE.md). Los datos reales y claves quedan fuera del repositorio.

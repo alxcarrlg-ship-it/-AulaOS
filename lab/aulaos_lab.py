@@ -1,27 +1,38 @@
-"""AulaOS Lab v0.1: escritorio, local, sin servicios externos obligatorios."""
+"""AulaOS internal 0.3: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
 import queue
-from chat import ChatService, OllamaProvider
+from chat import ChatService
+from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
+from settings import Settings, CredentialVault
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from pathlib import Path
 from core import Store, STATUS, today
 
-APP_DIR=Path(os.getenv('LOCALAPPDATA',Path.home()/'.aulaos_lab'))/'AulaOSLab'
+APP_DIR=Path(os.getenv('AULAOS_DATA_DIR') or (Path(os.getenv('LOCALAPPDATA',Path.home()/'.aulaos_lab'))/'AulaOSLab'))
 APP_DIR.mkdir(parents=True,exist_ok=True)
 DB_FILE=APP_DIR/'aulaos.sqlite3'
 
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.2')
+        self.title('AulaOS · Desarrollo interno 0.3')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
         self.chat_service=ChatService(self.store)
-        self.chat_busy=False;self.chat_results=queue.Queue()
+        self.chat_service.recover_interrupted()
+        self.settings_store=Settings(APP_DIR);self.settings=self.settings_store.load()
+        self.vault=CredentialVault(APP_DIR);self.api_key='';self.credential_notice=''
+        try:self.api_key=self.vault.load()
+        except OSError:self.credential_notice='No se pudo recuperar la clave guardada. Puedes volver a conectarla.'
+        except RuntimeError:self.credential_notice='La clave guardada requiere Windows. Modo básico disponible.'
+        if not self.api_key:self.settings['mode']='Básico sin conexión'
+        self.usage=UsageLedger(self.store)
+        self.chat_busy=False;self.chat_results=queue.Queue();self.audio_results=queue.Queue()
+        self.attachments={}
         self.gid=None;self.select_student=None
         self.group_ids={}
         self._style()
@@ -42,7 +53,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.2 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.3 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -109,19 +120,154 @@ class AulaOS(tk.Tk):
         ttk.Button(self.tab_tasks,text='Alternar realizada / pendiente',command=self.toggle_task).pack(side='left')
         ttk.Button(self.tab_tasks,text='Crear respaldo local',command=self.backup_now).pack(side='right')
     def _chat(self):
-        ttk.Label(self.tab_chat,text='Conversación guardada por escuela y grupo. IA local opcional; consultas básicas disponibles sin modelo.',foreground='#476682').pack(anchor='w',pady=6)
+        ttk.Label(self.tab_chat,text='Tus conversaciones quedan guardadas por escuela y grupo.',foreground='#476682').pack(anchor='w',pady=6)
         config=ttk.Frame(self.tab_chat);config.pack(fill='x')
-        ttk.Label(config,text='Modelo Ollama local (vacío: consultas básicas):').pack(side='left')
-        self.chat_model=tk.StringVar()
-        ttk.Entry(config,textvariable=self.chat_model,width=28).pack(side='left',padx=8)
+        self.chat_mode=tk.StringVar(value=self.settings['mode'])
+        self.mode_box=ttk.Combobox(config,textvariable=self.chat_mode,state='readonly',width=24,values=['Básico sin conexión','OpenAI online'])
+        self.mode_box.pack(side='left');self.mode_box.bind('<<ComboboxSelected>>',lambda e:self.mode_changed())
+        ttk.Button(config,text='Conexión y consumo',command=self.configure_online).pack(side='left',padx=8)
+        self.mode_hint=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.mode_hint,wraplength=950).pack(anchor='w',pady=5)
+        self.usage_text=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.usage_text,foreground='#506980').pack(anchor='w')
+        material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
+        ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
+        ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)
+        ttk.Button(material_bar,text='Quitar adjuntos',command=self.clear_attachments).pack(side='left')
+        self.attachment_text=tk.StringVar(value='Sin adjuntos para la próxima consulta')
+        ttk.Label(self.tab_chat,textvariable=self.attachment_text,wraplength=950).pack(anchor='w')
         self.chatlog=tk.Text(self.tab_chat,font=('Segoe UI',11),wrap='word',state='disabled')
         self.chatlog.pack(fill='both',expand=True,pady=7)
         row=ttk.Frame(self.tab_chat);row.pack(fill='x',pady=6)
         self.chat_msg=tk.StringVar();ent=ttk.Entry(row,textvariable=self.chat_msg)
         ent.pack(side='left',fill='x',expand=True,padx=(0,8));ent.bind('<Return>',lambda e:self.ask())
         self.chat_send=ttk.Button(row,text='Enviar',command=self.ask);self.chat_send.pack(side='left')
-        self.append_chat('AulaOS','Puedes preguntar: «¿Cuántas faltas lleva [nombre]?», «Historial de [nombre]» o «Pendientes».')
+        self.retry_button=ttk.Button(row,text='Reintentar último fallido',command=self.retry_chat);self.retry_button.pack(side='left',padx=5)
+        self.refresh_mode_hint();self.refresh_usage()
+
+    def refresh_mode_hint(self):
+        if self.chat_mode.get()=='OpenAI online':
+            records='Incluye registros del grupo seleccionado.' if self.settings['include_records'] else 'Registros escolares no adjuntos.'
+            self.mode_hint.set('Envío a OpenAI: tu mensaje y el historial previo online de este grupo. '+records+' Los adjuntos seleccionados también se envían. El historial puede contener información de adjuntos previos. Consumo API separado de ChatGPT.')
+        else:self.mode_hint.set('Modo básico: datos y consultas guardadas en este equipo. Sin generación avanzada ni búsquedas web.')
+
+    def refresh_attachments(self):
+        ids=self.attachments.get(self.gid,[])
+        names=[self.chat_service.materials.get(self.gid,i)['title'] for i in ids]
+        self.attachment_text.set('Próxima consulta: '+', '.join(names) if names else 'Sin adjuntos para la próxima consulta')
+
+    def clear_attachments(self):
+        self.attachments[self.gid]=[];self.refresh_attachments()
+
+    def open_materials(self):
+        gid=self.gid;materials=self.chat_service.materials
+        win=tk.Toplevel(self);win.title('Materiales del grupo · disponibles sin conexión');win.geometry('850x600')
+        ttk.Label(win,text='Se guarda una copia del texto. El original permanece intacto. Adjuntar online envía el texto a OpenAI.',wraplength=800).pack(padx=10,pady=8)
+        search=tk.StringVar();entry=ttk.Entry(win,textvariable=search);entry.pack(fill='x',padx=10)
+        box=tk.Listbox(win,selectmode='extended',exportselection=False,height=7);box.pack(fill='x',padx=10,pady=5)
+        preview=tk.Text(win,wrap='word',state='disabled');preview.pack(fill='both',expand=True,padx=10)
+        rows=[]
+        def refresh(*args):
+            rows[:]=materials.list(gid,search.get());box.delete(0,'end')
+            for r in rows:box.insert('end',f"[M{r['id']}] {r['title']}")
+        def selected():return [rows[i]['id'] for i in box.curselection()]
+        def show(event=None):
+            ids=selected()
+            if not ids:return
+            r=materials.get(gid,ids[0]);preview.configure(state='normal');preview.delete('1.0','end')
+            preview.insert('end',r['warning']+'\n\n'+r['content']);preview.configure(state='disabled')
+        def import_doc():
+            path=filedialog.askopenfilename(parent=win,filetypes=[('Documentos compatibles','*.txt *.md *.csv *.docx *.xlsx')])
+            if not path:return
+            try:
+                mid=materials.import_file(gid,path);search.set('');refresh()
+                index=next(i for i,r in enumerate(rows) if r['id']==mid)
+                box.selection_clear(0,'end');box.selection_set(index);show()
+            except Exception as exc:messagebox.showerror('No se importó',str(exc),parent=win)
+        def attach():
+            ids=selected()
+            try:materials.context(gid,ids)
+            except ValueError as exc:messagebox.showerror('Adjuntos',str(exc),parent=win);return
+            self.attachments[gid]=ids
+            if gid==self.gid:self.refresh_attachments()
+            win.destroy()
+        def save_fragment():
+            fragment=preview.get('sel.first','sel.last') if preview.tag_ranges('sel') else ''
+            if not fragment:messagebox.showinfo('Fragmento','Selecciona texto de la vista previa primero.',parent=win);return
+            title=simpledialog.askstring('Guardar fragmento','Título del fragmento:',parent=win)
+            if title:
+                materials.save(gid,title,fragment,'Fragmento seleccionado por el docente; puede omitir contexto del original.');refresh()
+        def export():
+            ids=selected()
+            if not ids:return
+            r=materials.get(gid,ids[0]);path=filedialog.asksaveasfilename(parent=win,defaultextension='.md',filetypes=[('Texto Markdown','*.md')])
+            if path:
+                try:Path(path).write_text(r['content'],encoding='utf-8')
+                except OSError as exc:messagebox.showerror('Exportación',str(exc),parent=win)
+        controls=ttk.Frame(win);controls.pack(fill='x',padx=10,pady=10)
+        for title,command in [('Importar archivo',import_doc),('Adjuntar seleccionados',attach),('Guardar fragmento',save_fragment),('Exportar texto',export)]:
+            ttk.Button(controls,text=title,command=command).pack(side='left',padx=3)
+        search.trace_add('write',refresh);box.bind('<<ListboxSelect>>',show);refresh()
+
+    def save_response(self):
+        answers=[r for r in self.chat_service.history(self.gid) if r['role']=='assistant' and r['state']=='complete']
+        if not answers:self.toast('Todavía no hay una respuesta para guardar.');return
+        title=simpledialog.askstring('Guardar respuesta como material','Título:',parent=self)
+        if title:
+            try:self.chat_service.materials.save(self.gid,title,answers[-1]['content'])
+            except ValueError as exc:messagebox.showerror('Material',str(exc),parent=self);return
+            self.toast('Respuesta guardada en Materiales de este grupo.')
+
+    def refresh_usage(self):
+        u=self.usage.summary()
+        self.usage_text.set(f"Este mes: {u['attempts']}/{self.settings['monthly_limit']} intentos online · {u['input_tokens']+u['output_tokens']} tokens informados · estimación US${u['estimate_usd']:.4f} · {u['unknown']} sin costo confirmado")
+
+    def mode_changed(self):
+        if self.chat_mode.get()=='OpenAI online' and not self.api_key:
+            self.configure_online()
+            if not self.api_key:self.chat_mode.set('Básico sin conexión')
+        self.settings['mode']=self.chat_mode.get();self.settings_store.save(self.settings);self.refresh_mode_hint()
+
+    def configure_online(self):
+        win=tk.Toplevel(self);win.title('Conexión de OpenAI y consumo');win.transient(self);win.grab_set()
+        box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+        ttk.Label(box,text='La API de OpenAI tiene consumo separado de ChatGPT. No se harán llamadas al guardar.',wraplength=550).pack(anchor='w',pady=5)
+        if self.credential_notice:ttk.Label(box,text=self.credential_notice,wraplength=550).pack(anchor='w')
+        ttk.Label(box,text='Clave API personal (vacío conserva la actual):').pack(anchor='w')
+        key=tk.StringVar();ttk.Entry(box,textvariable=key,show='•',width=60).pack(fill='x',pady=5)
+        remember=tk.BooleanVar(value=False)
+        ttk.Checkbutton(box,text='Guardar cifrada para este usuario de Windows',variable=remember,state='normal' if os.name=='nt' else 'disabled').pack(anchor='w')
+        ttk.Label(box,text='Perfil de respuesta:').pack(anchor='w',pady=(10,0))
+        profile=tk.StringVar(value=self.settings['profile']);ttk.Combobox(box,textvariable=profile,values=list(PROFILES),state='readonly').pack(anchor='w')
+        limit=tk.StringVar(value=str(self.settings['monthly_limit']));output=tk.StringVar(value=str(self.settings['max_output_tokens']))
+        ttk.Label(box,text='Máximo de intentos online por mes (también cuentan errores):').pack(anchor='w',pady=(10,0));ttk.Entry(box,textvariable=limit,width=10).pack(anchor='w')
+        ttk.Label(box,text='Longitud máxima de respuesta (256–4096 tokens):').pack(anchor='w');ttk.Entry(box,textvariable=output,width=10).pack(anchor='w')
+        records=tk.BooleanVar(value=self.settings['include_records'])
+        ttk.Checkbutton(box,text='Adjuntar registros del grupo activo al consultar online',variable=records).pack(anchor='w',pady=10)
+        ttk.Label(box,text='Los límites son locales a esta instalación. La estimación no sustituye la factura; algunas solicitudes fallidas pueden consumir. El historial online puede contener datos compartidos previamente.',wraplength=550).pack(anchor='w')
+        def save():
+            try:
+                values=dict(self.settings,profile=profile.get(),monthly_limit=int(limit.get()),max_output_tokens=int(output.get()),include_records=records.get())
+                Settings.validate(values)
+                new_key=key.get().strip()
+                if new_key:
+                    if remember.get():self.vault.save(new_key)
+                    else:self.vault.delete()
+                    self.api_key=new_key
+                self.settings_store.save(values);self.settings=values;self.credential_notice=''
+                self.refresh_mode_hint();self.refresh_usage();win.destroy()
+            except (ValueError,OSError,RuntimeError) as exc:messagebox.showerror('Configuración',str(exc),parent=win)
+        def forget():
+            self.vault.delete();self.api_key='';self.chat_mode.set('Básico sin conexión')
+            self.settings['mode']='Básico sin conexión';self.settings_store.save(self.settings);self.refresh_mode_hint();win.destroy()
+        row=ttk.Frame(box);row.pack(fill='x',pady=(14,0))
+        ttk.Button(row,text='Guardar',command=save).pack(side='left')
+        ttk.Button(row,text='Olvidar clave',command=forget).pack(side='left',padx=8)
+        ttk.Button(row,text='Cancelar',command=win.destroy).pack(side='right')
+        self.wait_window(win)
+
     def close(self):
+        if self.chat_busy:
+            messagebox.showinfo('Solicitud en curso','Espera a que termine la solicitud antes de cerrar. Los registros ya están guardados.',parent=self)
+            return
         try:self.store.backup()
         except Exception as exc:messagebox.showwarning('Respaldo pendiente',f'No pude crear el respaldo automático: {exc}',parent=self)
         self.store.close();self.destroy()
@@ -279,35 +425,60 @@ class AulaOS(tk.Tk):
     def append_chat(self,who,msg):
         self.chatlog.configure(state='normal');self.chatlog.insert('end',f'{who}:\n{msg}\n\n');self.chatlog.see('end');self.chatlog.configure(state='disabled')
     def load_chat(self):
+        self.refresh_attachments()
         self.chatlog.configure(state='normal');self.chatlog.delete('1.0','end');self.chatlog.configure(state='disabled')
         for item in self.chat_service.history(self.gid):
             label='Docente' if item['role']=='user' else 'AulaOS'
-            if item['state']!='complete':label+=' · '+item['state']
+            if item['state']!='complete':label+=' · '+{'failed':'no completado','pending':'en curso'}.get(item['state'],item['state'])
+            label+=' · '+{'online':'OpenAI','basic':'básico','ai':'local','legacy':'anterior'}.get(item['source'],item['source'])
             self.append_chat(label,item['content'])
-    def ask(self):
-        question=self.chat_msg.get().strip()
+            ids=[r[0] for r in self.store.con.execute('SELECT material_id FROM message_materials WHERE message_id=?',(item['id'],))]
+            if ids:self.append_chat('Adjuntos',', '.join(f'[M{i}]' for i in ids))
+    def retry_chat(self):
+        if self.chat_busy:return
+        users=[m for m in self.chat_service.history(self.gid) if m['role']=='user']
+        if not users or users[-1]['state']!='failed':self.toast('El último mensaje de este grupo no necesita reintento.');return
+        message=users[-1]
+        if self.chat_mode.get()=='OpenAI online' and not messagebox.askyesno('Reintentar consulta','Será una nueva solicitud online y puede generar consumo. ¿Reintentar el mensaje guardado?',parent=self):return
+        self.ask(message['id'],message['content'])
+
+    def ask(self,retry_id=None,retry_text=None):
+        question=retry_text if retry_text is not None else self.chat_msg.get().strip()
         if not question or self.chat_busy:return
-        gid=self.gid;model=self.chat_model.get().strip()
-        self.chat_busy=True;self.chat_send.configure(state='disabled');self.chat_msg.set('')
-        self.append_chat('Docente',question);self.toast('Procesando en el contexto seleccionado…')
+        material_ids=list(self.attachments.get(self.gid,[]))
+        gid=self.gid;settings=dict(self.settings);mode=self.chat_mode.get();api_key=self.api_key
+        if mode=='OpenAI online' and not api_key:
+            self.configure_online();return
+        if retry_id is None:
+            try:self.chat_service.materials.context(gid,material_ids)
+            except ValueError as exc:messagebox.showerror('Adjuntos',str(exc),parent=self);return
+            self.clear_attachments()
+        self.chat_busy=True;self.chat_send.configure(state='disabled');self.retry_button.configure(state='disabled')
+        if retry_id is None:self.chat_msg.set('');self.append_chat('Docente',question)
+        self.toast('Consultando OpenAI…' if mode=='OpenAI online' else 'Consultando registros locales…')
         def work():
             store=None
             try:
                 store=Store(DB_FILE)
-                answer=ChatService(store).send(gid,question,OllamaProvider(model) if model else None)
-                self.chat_results.put((gid,answer,None))
-            except Exception as exc:self.chat_results.put((gid,None,str(exc)))
+                provider=MeteredProvider(store,OpenAIProvider(api_key,settings['profile'],settings['max_output_tokens']),settings['monthly_limit']) if mode=='OpenAI online' else None
+                answer=ChatService(store).send(gid,question,provider,include_records=settings['include_records'],retry_id=retry_id,material_ids=material_ids)
+                self.chat_results.put((gid,answer,None,None))
+            except Exception as exc:self.chat_results.put((gid,None,str(exc),getattr(exc,'kind','unknown')))
             finally:
                 if store is not None:store.close()
         threading.Thread(target=work,daemon=True).start()
+
     def poll_chat(self):
-        try:
-            gid,answer,error=self.chat_results.get_nowait()
+        try:gid,answer,error,kind=self.chat_results.get_nowait()
         except queue.Empty:pass
         else:
-            self.chat_busy=False;self.chat_send.configure(state='normal')
+            self.chat_busy=False;self.chat_send.configure(state='normal');self.retry_button.configure(state='normal')
             if gid==self.gid:self.load_chat()
-            if error:self.toast('No se pudo responder: '+error)
+            self.refresh_usage()
+            if error:
+                if kind=='connection':
+                    self.chat_mode.set('Básico sin conexión');self.settings['mode']='Básico sin conexión';self.settings_store.save(self.settings);self.refresh_mode_hint()
+                self.toast(error)
             elif gid!=self.gid:self.toast('Respuesta guardada en el grupo de origen.')
             else:self.toast('Respuesta guardada localmente.')
         self.after(100,self.poll_chat)
