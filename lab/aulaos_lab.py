@@ -1,8 +1,12 @@
-"""AulaOS internal 0.3: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.4: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
 import queue
+import json
+import re
+import webbrowser
+from research import domains, safe_url
 from chat import ChatService
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
 from settings import Settings, CredentialVault
@@ -18,7 +22,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.3')
+        self.title('AulaOS · Desarrollo interno 0.4')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -53,7 +57,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.3 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.4 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -127,6 +131,11 @@ class AulaOS(tk.Tk):
         self.mode_box.pack(side='left');self.mode_box.bind('<<ComboboxSelected>>',lambda e:self.mode_changed())
         ttk.Button(config,text='Conexión y consumo',command=self.configure_online).pack(side='left',padx=8)
         self.mode_hint=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.mode_hint,wraplength=950).pack(anchor='w',pady=5)
+        web_row=ttk.Frame(self.tab_chat);web_row.pack(fill='x',pady=4)
+        self.research_mode=tk.BooleanVar(value=False)
+        ttk.Checkbutton(web_row,text='Investigar en internet (esta consulta)',variable=self.research_mode,command=self.refresh_mode_hint).pack(side='left')
+        ttk.Label(web_row,text='Dominios opcionales:').pack(side='left',padx=5)
+        self.research_domains=tk.StringVar();ttk.Entry(web_row,textvariable=self.research_domains,width=32).pack(side='left')
         self.usage_text=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.usage_text,foreground='#506980').pack(anchor='w')
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
@@ -144,7 +153,9 @@ class AulaOS(tk.Tk):
         self.refresh_mode_hint();self.refresh_usage()
 
     def refresh_mode_hint(self):
-        if self.chat_mode.get()=='OpenAI online':
+        if self.chat_mode.get()=='OpenAI online' and self.research_mode.get():
+            self.mode_hint.set('Investigación: solo se envía tu pregunta actual, sin historial, registros ni adjuntos. Hasta 3 llamadas web; estimación US$0.01 por búsqueda más tokens. No incluyas datos personales en la pregunta.')
+        elif self.chat_mode.get()=='OpenAI online':
             records='Incluye registros del grupo seleccionado.' if self.settings['include_records'] else 'Registros escolares no adjuntos.'
             self.mode_hint.set('Envío a OpenAI: tu mensaje y el historial previo online de este grupo. '+records+' Los adjuntos seleccionados también se envían. El historial puede contener información de adjuntos previos. Consumo API separado de ChatGPT.')
         else:self.mode_hint.set('Modo básico: datos y consultas guardadas en este equipo. Sin generación avanzada ni búsquedas web.')
@@ -173,7 +184,9 @@ class AulaOS(tk.Tk):
             ids=selected()
             if not ids:return
             r=materials.get(gid,ids[0]);preview.configure(state='normal');preview.delete('1.0','end')
-            preview.insert('end',r['warning']+'\n\n'+r['content']);preview.configure(state='disabled')
+            for tag in preview.tag_names():
+                if tag.startswith('link_'):preview.tag_delete(tag)
+            self.insert_links(preview,r['warning']+'\n\n'+r['content']);preview.configure(state='disabled')
         def import_doc():
             path=filedialog.askopenfilename(parent=win,filetypes=[('Documentos compatibles','*.txt *.md *.csv *.docx *.xlsx')])
             if not path:return
@@ -218,7 +231,7 @@ class AulaOS(tk.Tk):
 
     def refresh_usage(self):
         u=self.usage.summary()
-        self.usage_text.set(f"Este mes: {u['attempts']}/{self.settings['monthly_limit']} intentos online · {u['input_tokens']+u['output_tokens']} tokens informados · estimación US${u['estimate_usd']:.4f} · {u['unknown']} sin costo confirmado")
+        self.usage_text.set(f"Este mes: {u['attempts']}/{self.settings['monthly_limit']} intentos online · {u['input_tokens']+u['output_tokens']} tokens informados · estimación US${u['estimate_usd']:.4f} · web: {u['web_searches']} búsquedas / US${u['web_estimate_usd']:.4f} adicionales · {u['unknown']} sin costo confirmado")
 
     def mode_changed(self):
         if self.chat_mode.get()=='OpenAI online' and not self.api_key:
@@ -423,14 +436,35 @@ class AulaOS(tk.Tk):
         tid=int(items[0]);task=next((t for t in self.store.tasks() if t['id']==tid),None)
         if task:self.store.task_done(tid,not task['done']);self.load_tasks()
     def append_chat(self,who,msg):
-        self.chatlog.configure(state='normal');self.chatlog.insert('end',f'{who}:\n{msg}\n\n');self.chatlog.see('end');self.chatlog.configure(state='disabled')
+        self.chatlog.configure(state='normal');self.chatlog.insert('end',who+':\n')
+        self.insert_links(self.chatlog,msg)
+        self.chatlog.insert('end','\n\n');self.chatlog.see('end');self.chatlog.configure(state='disabled')
+
+    def insert_links(self,widget,text):
+        offset=0
+        for match in re.finditer(r'\[([^\]\n]+)\]\((https?://[^\s)]+)\)',text):
+            widget.insert('end',text[offset:match.start()]);url=safe_url(match.group(2))
+            if url:
+                tag='link_'+str(len(widget.tag_names()))
+                widget.insert('end',match.group(1),(tag,));widget.tag_configure(tag,foreground='#175ca4',underline=True)
+                widget.tag_bind(tag,'<Button-1>',lambda e,u=url:self.open_source(u))
+            else:widget.insert('end',match.group(0))
+            offset=match.end()
+        widget.insert('end',text[offset:])
+
+    def open_source(self,url):
+        if safe_url(url) and messagebox.askyesno('Abrir fuente',url+'\n\n¿Abrir en tu navegador?',parent=self):
+            webbrowser.open(url,new=2)
+
     def load_chat(self):
         self.refresh_attachments()
         self.chatlog.configure(state='normal');self.chatlog.delete('1.0','end');self.chatlog.configure(state='disabled')
+        for tag in self.chatlog.tag_names():
+            if tag.startswith('link_'):self.chatlog.tag_delete(tag)
         for item in self.chat_service.history(self.gid):
             label='Docente' if item['role']=='user' else 'AulaOS'
             if item['state']!='complete':label+=' · '+{'failed':'no completado','pending':'en curso'}.get(item['state'],item['state'])
-            label+=' · '+{'online':'OpenAI','basic':'básico','ai':'local','legacy':'anterior'}.get(item['source'],item['source'])
+            label+=' · '+{'online':'OpenAI','basic':'básico','ai':'local','legacy':'anterior','research':'investigación web'}.get(item['source'],item['source'])
             self.append_chat(label,item['content'])
             ids=[r[0] for r in self.store.con.execute('SELECT material_id FROM message_materials WHERE message_id=?',(item['id'],))]
             if ids:self.append_chat('Adjuntos',', '.join(f'[M{i}]' for i in ids))
@@ -447,20 +481,32 @@ class AulaOS(tk.Tk):
         if not question or self.chat_busy:return
         material_ids=list(self.attachments.get(self.gid,[]))
         gid=self.gid;settings=dict(self.settings);mode=self.chat_mode.get();api_key=self.api_key
+        research=self.research_mode.get();allowed=[]
+        if retry_id is not None:
+            original=next(m for m in self.chat_service.history(gid) if m['id']==retry_id)
+            saved=json.loads(original['request_options']);research=bool(saved.get('research'));allowed=saved.get('domains',[])
+        if research:
+            if mode!='OpenAI online':self.toast('La investigación requiere OpenAI online. Puedes leer hallazgos guardados sin conexión.');return
+            if retry_id is None:
+                if material_ids:self.toast('Quita los adjuntos para investigar. Solo se enviará tu pregunta.');return
+                try:allowed=domains(self.research_domains.get())
+                except ValueError as exc:messagebox.showerror('Dominios',str(exc),parent=self);return
+            else:material_ids=[]
         if mode=='OpenAI online' and not api_key:
             self.configure_online();return
         if retry_id is None:
             try:self.chat_service.materials.context(gid,material_ids)
             except ValueError as exc:messagebox.showerror('Adjuntos',str(exc),parent=self);return
             self.clear_attachments()
+        self.research_mode.set(False);self.refresh_mode_hint()
         self.chat_busy=True;self.chat_send.configure(state='disabled');self.retry_button.configure(state='disabled')
         if retry_id is None:self.chat_msg.set('');self.append_chat('Docente',question)
-        self.toast('Consultando OpenAI…' if mode=='OpenAI online' else 'Consultando registros locales…')
+        self.toast('Investigando en la web… Puede tardar hasta dos minutos.' if research else 'Consultando OpenAI…' if mode=='OpenAI online' else 'Consultando registros locales…')
         def work():
             store=None
             try:
                 store=Store(DB_FILE)
-                provider=MeteredProvider(store,OpenAIProvider(api_key,settings['profile'],settings['max_output_tokens']),settings['monthly_limit']) if mode=='OpenAI online' else None
+                provider=MeteredProvider(store,OpenAIProvider(api_key,settings['profile'],settings['max_output_tokens'],research=research,allowed_domains=allowed),settings['monthly_limit']) if mode=='OpenAI online' else None
                 answer=ChatService(store).send(gid,question,provider,include_records=settings['include_records'],retry_id=retry_id,material_ids=material_ids)
                 self.chat_results.put((gid,answer,None,None))
             except Exception as exc:self.chat_results.put((gid,None,str(exc),getattr(exc,'kind','unknown')))

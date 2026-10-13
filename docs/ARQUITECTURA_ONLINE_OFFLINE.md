@@ -33,7 +33,7 @@ La integración propia en línea requiere una vía de acceso soportada por OpenA
 
 ## Estado
 
-Incremento interno 0.3: chat persistente, funciones básicas, materiales locales y adjuntos seleccionados. Integración OpenAI y gestión de intentos/costos implementadas con pruebas simuladas; falta llamada real. Una falla de conexión activa el modo básico, sin afirmar que diagnostica toda la conectividad del equipo. Por acuerdo del usuario, comprobaciones Windows y empaquetado se reservan para 1.0. Este documento sustituye la prioridad anterior de seleccionar un motor local principal.
+Incremento interno 0.4: chat persistente, funciones básicas, materiales locales, adjuntos seleccionados e investigación web opcional con fuentes. La investigación solo envía la pregunta actual, sin datos escolares, documentos ni historial. Integración OpenAI y gestión de intentos/costos implementadas con pruebas simuladas; falta llamada real. Una falla de conexión activa el modo básico, sin afirmar que diagnostica toda la conectividad del equipo. Por acuerdo del usuario, comprobaciones Windows y empaquetado se reservan para 1.0. Este documento sustituye la prioridad anterior de seleccionar un motor local principal.
 
 Fuentes de implementación a consultar:
 - https://developers.openai.com/api/docs/pricing
