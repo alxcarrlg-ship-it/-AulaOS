@@ -8,6 +8,7 @@ from core import Store
 from online import OpenAIProvider,MeteredProvider
 from template_suggestions import TemplateSuggestions
 from teaching_profiles_ui import ProfileEditor
+from teaching_profiles import missing_details
 
 class SuggestionWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -80,6 +81,14 @@ class SuggestionWindow(tk.Toplevel):
         material_ids=list(self.app.attachments.get(self.gid,[])) if self.use_sources.get() else []
         profile=self.selected_profile();profile_id=profile['id'] if profile else None;profile_revision=profile['revision'] if profile else None
         try:
+            snapshot=self.service.profiles.snapshot(self.gid,profile_id,profile_revision)
+            questions=missing_details(snapshot,goal)
+            if questions:
+                dialog=DetailsDialog(self,questions)
+                self.wait_window(dialog)
+                if dialog.result is None:return
+                self.goal.insert('end','\n'+dialog.result)
+                goal=self.goal.get('1.0','end-1c').strip()
             _,_,messages=self.service.context(self.gid,self.did,goal,revision,material_ids,profile_id,profile_revision)
             sources=json.loads(messages[-1]['content'])['sources']
         except Exception as exc:messagebox.showerror('Propuesta',str(exc),parent=self);return
@@ -189,4 +198,29 @@ class ReviewChanges(tk.Toplevel):
             answer=messagebox.askyesnocancel('Guardar revisión','¿Guardar tus correcciones y selección para continuar después? No se aplicarán al documento.',parent=self)
             if answer is None:return
             if answer and not self.save():return
+        self.destroy()
+
+
+class DetailsDialog(tk.Toplevel):
+    """Collect the profile's missing answers together without an API call."""
+    def __init__(self,parent,questions):
+        super().__init__(parent);self.result=None;self.questions=questions;self.answers=[]
+        self.title('Aclarar antes de generar');self.transient(parent);self.resizable(True,False)
+        ttk.Label(self,text='Completa los datos de este perfil. Si alguno no aplica, explica por qué.\nLas respuestas se añadirán a tu petición antes de confirmar el envío.',wraplength=580).pack(padx=12,pady=10)
+        for question in questions:
+            ttk.Label(self,text=question,wraplength=580).pack(anchor='w',padx=12)
+            value=tk.StringVar();self.answers.append(value)
+            ttk.Entry(self,textvariable=value,width=70).pack(fill='x',padx=12,pady=(0,6))
+        controls=ttk.Frame(self);controls.pack(fill='x',padx=12,pady=10)
+        ttk.Button(controls,text='Añadir a la petición',command=self.accept).pack(side='left')
+        ttk.Button(controls,text='Cancelar',command=self.cancel).pack(side='left',padx=8)
+        self.protocol('WM_DELETE_WINDOW',self.cancel);self.grab_set()
+    def accept(self):
+        text='\n'.join(q+': '+v.get().strip().replace('\n',' ').replace('\r',' ') for q,v in zip(self.questions,self.answers))
+        missing=missing_details({'questions':self.questions},text)
+        if missing:messagebox.showinfo('Datos pendientes','Falta aclarar: '+', '.join(missing),parent=self);return
+        self.result=text;self.destroy()
+    def cancel(self):
+        if any(v.get().strip() for v in self.answers):
+            if not messagebox.askyesno('Cancelar aclaraciones','¿Descartar estas respuestas? Tu petición anterior permanecerá intacta.',parent=self):return
         self.destroy()

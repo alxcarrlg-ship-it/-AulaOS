@@ -226,3 +226,29 @@ class SuggestionsTest(unittest.TestCase):
         _,schema,messages=self.service.context(self.gid,self.did,'Clase',1,profile_id=pid)
         self.assertEqual(schema['tables'][0]['columns'],3)
         self.assertEqual(json.loads(messages[-1]['content'])['teaching_profile']['id'],pid)
+
+    def test_required_details_block_before_provider_and_allow_answers(self):
+        pid=self.service.profiles.save(self.gid,'Formato','Docente','Requisitos',questions=['Sesiones','Producto'])
+        class Forbidden:
+            def respond(self,messages):raise AssertionError('No debe consumir API')
+        with self.assertRaises(ValueError):self.service.propose(self.gid,self.did,'Clase',1,Forbidden(),profile_id=pid)
+        sid=self.service.propose(self.gid,self.did,'Clase\nSesiones: 3\nProducto: Cartel',1,self.provider(),profile_id=pid)
+        self.assertEqual(json.loads(self.service.get(self.gid,sid)['profile_json'])['questions'],['Sesiones','Producto'])
+
+    def test_required_details_validation_and_preservation(self):
+        profiles=self.service.profiles
+        for questions in [['X','x'],['Dato:'],['a\nb'],['X']*9,[None]]:
+            with self.assertRaises(ValueError):profiles.save(self.gid,'Formato','Docente','Texto',questions=questions)
+        pid=profiles.save(self.gid,'Formato','Docente','Texto',questions=['Sesiones'])
+        profiles.save(self.gid,'Formato','Docente','Otro texto',pid,1)
+        self.assertEqual(profiles.snapshot(self.gid,pid)['questions'],['Sesiones'])
+        profiles.save(self.gid,'Formato','Docente','Otro texto',pid,2,questions=[])
+        self.assertEqual(profiles.snapshot(self.gid,pid)['questions'],[])
+
+    def test_missing_details_are_explicit_not_inferred(self):
+        from teaching_profiles import missing_details
+        profile={'questions':['Sesiones','Producto']}
+        self.assertEqual(missing_details(profile,'Haré tres sesiones con cartel'),['Sesiones','Producto'])
+        self.assertEqual(missing_details(profile,'SESIONES: 3\nProducto: pendiente'),['Producto'])
+        self.assertEqual(missing_details(profile,'Sesiones: 3\nProducto: No aplica porque será práctica oral'),[])
+        self.assertEqual(missing_details(None,'Clase'),[])
