@@ -1,10 +1,11 @@
 # AulaOS
 
-Asistente docente para Windows, en desarrollo. **0.9 en desarrollo**, sobre la base 0.8: primer avance de propuestas de contenido por campo de plantilla, con revisión antes de aplicar. La 0.9 no está cerrada. No hay un instalador validado ni se exige que el usuario final instale Python.
+Asistente docente para Windows, en desarrollo. **0.9 en desarrollo**, sobre la base 0.8: propuestas de contenido por campo con fuentes seleccionadas y preparación de acciones en lenguaje natural, siempre revisables. La 0.9 no está cerrada. No hay un instalador validado ni se exige que el usuario final instale Python.
 
 ## Funciones implementadas
 
-- Avance 0.9: pedir una propuesta online para campos existentes de una plantilla, revisar texto anterior/nuevo y aceptar como versión nueva o descartar. Aislamiento por documento y bloqueo si el documento cambió. Aún sin evaluación pedagógica ni prueba real de API.
+- Avance 0.9: propuestas online por campo de plantilla con hasta tres materiales seleccionados; revisión antes/después, fuentes conservadas y aplicación como versión nueva. Aislamiento y bloqueo de cambios concurrentes.
+- Preparar una tarea, observación o borrador con tus palabras desde el chat. La interpretación online genera una propuesta; la identificación de alumnos se resuelve localmente y los homónimos piden aclaración. Confirmar sigue siendo obligatorio. Aún sin evaluación pedagógica ni prueba real de API.
 
 - Catálogo local de carpetas por grupo, búsqueda por nombre/ruta desde `/buscar`, lectura previa y copias inmutables para adjuntar. Detecta cambios entre vista previa y adjunto.
 - Grabación local hasta 30 segundos, importación de audio y transcripción OpenAI explícita. Revisión editable, historial por grupo y paso al cuadro del chat sin enviar ni ejecutar automáticamente.
@@ -39,7 +40,7 @@ El modo sin conexión permite consultar registros, leer y guardar materiales. No
 
 ## Verificación
 
-146 pruebas de lógica/datos/exportación: 145 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+162 pruebas de lógica/datos/exportación: 161 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
 
 Además, tres formatos sintéticos de 3/6/8 columnas renderizados e inspeccionados en Linux para 0.7.
 

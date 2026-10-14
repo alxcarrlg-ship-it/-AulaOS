@@ -1,4 +1,4 @@
-"""Explicit local chat actions. No model output or attachment is executable."""
+"""Reviewed actions. Online interpretations are proposals, never direct writes."""
 import datetime as dt
 import json
 import re
@@ -30,6 +30,10 @@ class Actions:
           CHECK(state IN ('pending','applied','cancelled')), result_id INTEGER,
           created_at TEXT NOT NULL, resolved_at TEXT, request_id INTEGER UNIQUE);
         CREATE INDEX IF NOT EXISTS actions_group ON action_proposals(group_id,id);''')
+        columns={r[1] for r in store.con.execute('PRAGMA table_info(action_proposals)')}
+        for name,definition in [('source',"TEXT NOT NULL DEFAULT 'local'"),('original_text',"TEXT NOT NULL DEFAULT ''"),('notes',"TEXT NOT NULL DEFAULT ''")]:
+            if name not in columns:store.con.execute(f'ALTER TABLE action_proposals ADD COLUMN {name} {definition}')
+        store.con.commit()
 
     def scope(self,gid):
         if gid is None:return 'General'
@@ -86,7 +90,8 @@ class Actions:
                 f"Observación: {p['student_name']} (#{p['student_id']})\nFecha: {p['day']}\nHechos: {p['detail']}" if row['kind']=='event' else
                 f"Borrador: {p['title']}\n{p['content']}")
         state={'pending':'Por confirmar; todavía no aplicado','applied':'Aplicado','cancelled':'Cancelado'}[row['state']]
-        return f"Acción #{aid} — {state}\nDestino: {row['scope']}\n{detail}\n\nRevisa esta propuesta en «Acciones»."
+        provenance=('\n\nInterpretación de IA; verifica cada dato.\nPetición: '+row['original_text']+'\nNotas: '+row['notes']) if row['source']=='online_interpretation' else ''
+        return f"Acción #{aid} — {state}\nDestino: {row['scope']}\n{detail}{provenance}\n\nRevisa esta propuesta en «Acciones»."
 
     def resolve(self,gid,aid,apply=False):
         con=self.store.con;con.execute('BEGIN IMMEDIATE')

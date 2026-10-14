@@ -14,6 +14,7 @@ from templates_ui import open_templates
 from folders_ui import FolderWindow
 from folders import is_search
 from voice_ui import VoiceWindow
+from natural_actions_ui import NaturalActionWindow
 from drafts import Drafts
 from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
@@ -149,6 +150,7 @@ class AulaOS(tk.Tk):
         local_bar=ttk.Frame(self.tab_chat);local_bar.pack(fill='x',pady=4)
         ttk.Button(local_bar,text='Carpetas / buscar archivos',command=lambda:FolderWindow(self,self.gid)).pack(side='left')
         ttk.Button(local_bar,text='Voz / dictado',command=self.record_audio).pack(side='left',padx=5)
+        ttk.Button(local_bar,text='Preparar acción con IA',command=lambda:NaturalActionWindow(self,self.gid,self.chat_msg.get())).pack(side='left',padx=5)
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
         ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)

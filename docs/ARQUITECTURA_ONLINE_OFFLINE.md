@@ -60,3 +60,10 @@ El formato pertenece al docente/centro, no al programa. `templates.py` guarda by
 ## Avance 0.9: propuestas de contenido por campo
 
 `template_suggestions.py` envía solo petición y campos editables actuales a un proveedor online existente. Valida JSON, IDs y límites, conserva una propuesta sin modificar el documento y expone diferencias contra la revisión base. Aplicar guarda una revisión nueva y marca la propuesta en una transacción; los cambios concurrentes bloquean la aplicación. `template_suggestions_ui.py` permite pedir/reabrir/revisar/aplicar/descartar. Se reutilizan credencial, perfil y límite mensual existentes. No hay ejecución de instrucciones del modelo, búsqueda web ni carga de expedientes implícita. La 0.9 sigue en desarrollo.
+
+
+## Continuación 0.9: acciones naturales y fuentes
+
+`natural_actions.py` convierte una petición explícita de acción en un esquema acotado task/event/draft/clarify. Solo se envían petición y fecha local; nombres e IDs se contrastan localmente con el grupo de origen. El alumno debe aparecer en la petición y los casos ambiguos no generan propuesta. Se reutiliza `action_proposals` y su confirmación transaccional; una migración conserva origen, petición y notas para auditoría. `natural_actions_ui.py` se abre desde el chat sin cambiar la ruta normal de conversación.
+
+Las sugerencias de plantilla admiten fuentes seleccionadas por ID con el mismo aislamiento de materiales. La petición completa sigue limitada a 18 KB; se conserva un snapshot textual de las fuentes junto a la propuesta. Las citas M deben referir a fuentes enviadas, sin que esto garantice que el contenido respalde la afirmación. Fuentes web guardadas se reutilizan como material, sin otra búsqueda automática.
