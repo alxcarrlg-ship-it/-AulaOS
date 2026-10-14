@@ -1,8 +1,11 @@
 # AulaOS
 
-Asistente docente para Windows, en desarrollo. Incremento interno **0.6**: acciones locales desde el chat, con vista previa, confirmación e historial. No hay un instalador validado ni se exige que el usuario final instale Python.
+Asistente docente para Windows, en desarrollo. Incremento interno **0.7**: plantillas Word propias por docente y grupo, con documentos versionados y conservación de su estructura. No hay un instalador validado ni se exige que el usuario final instale Python.
 
 ## Funciones implementadas
+
+- Plantillas DOCX propias: reconocer tablas de diferentes tamaños, celdas combinadas, encabezados, pies y párrafos editables. Las seis columnas son una preferencia particular, no una regla del programa.
+- Crear documentos versionados sobre una copia del formato, insertar texto de borradores y exportar conservando logos incrustados, tablas y márgenes. Adjuntar voluntariamente la estructura al chat para orientar el contenido.
 
 - Crear tareas, registrar observaciones de alumnos y guardar borradores desde comandos del chat. Vista previa por escuela/grupo, confirmación explícita, cancelación e historial persistente. Funcionan sin internet; `/acciones` muestra los formatos. No se ejecutan instrucciones de documentos ni respuestas del modelo.
 
@@ -21,15 +24,17 @@ Asistente docente para Windows, en desarrollo. Incremento interno **0.6**: accio
 
 ## Privacidad y límites
 
-Los originales no se modifican. Se guarda el texto extraído en SQLite; no se preserva el diseño Word/Excel ni se ejecutan macros o fórmulas. Los archivos se eligen manualmente: no hay exploración automática del disco. Importar no envía documentos a OpenAI. Enviar una consulta online incluye los adjuntos seleccionados y el historial online del grupo, que puede contener información de documentos previamente usados. Los registros escolares se incluyen solo al activar su opción en la interfaz.
+Los originales no se modifican. En Materiales se guarda el texto extraído en SQLite, sin preservar diseño Word/Excel. En Plantillas se conserva el paquete DOCX completo para crear copias con su estructura. No se ejecutan macros o fórmulas. Los archivos se eligen manualmente: no hay exploración automática del disco. Importar no envía documentos a OpenAI. Enviar una consulta online incluye los adjuntos seleccionados y el historial online del grupo, que puede contener información de documentos previamente usados. Los registros escolares se incluyen solo al activar su opción en la interfaz.
 
 Credencial de sesión o guardado opcional mediante DPAPI de Windows; no se distribuye una clave compartida. `store: false` en la solicitud no promete retención cero del proveedor. El límite local cuenta intentos, no garantiza un máximo de dinero. Los fallos con consumo desconocido se muestran como tal.
 
-El modo sin conexión permite consultar registros, leer y guardar materiales. No resume documentos con IA. La investigación web usa una solicitud independiente: solo la pregunta actual, sin registros, adjuntos ni historial. El docente debe incluir el tema y el nivel en esa pregunta. La exportación 0.5 crea documentos nuevos; no reproduce plantillas originales, logos ni diseños complejos. Transcripción, edición DOCX/PPTX preservando formato y acciones arbitrarias en lenguaje libre no están implementadas. Los borradores requieren guardar: se avisa antes de cerrar con cambios, pero no hay autoguardado ante un cierre forzado.
+El modo sin conexión permite consultar registros, leer y guardar materiales. No resume documentos con IA. La investigación web usa una solicitud independiente: solo la pregunta actual, sin registros, adjuntos ni historial. El docente debe incluir el tema y el nivel en esa pregunta. La exportación 0.5 crea documentos nuevos; no reproduce plantillas originales, logos ni diseños complejos. Las plantillas 0.7 permiten edición selectiva de texto conservando su estructura; no interpretan automáticamente los requisitos de cada campo ni redistribuyen contenido. Transcripción, edición PPTX y acciones arbitrarias en lenguaje libre no están implementadas. Los borradores requieren guardar: se avisa antes de cerrar con cambios, pero no hay autoguardado ante un cierre forzado.
 
 ## Verificación
 
-101 pruebas de lógica/datos/exportación: 100 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI se simulan; falta validación real con credencial. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+115 pruebas de lógica/datos/exportación: 114 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI se simulan; falta validación real con credencial. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+
+Además, tres formatos sintéticos de 3/6/8 columnas renderizados e inspeccionados en Linux para 0.7.
 
 Por acuerdo del usuario, las comprobaciones de Windows, interfaz en ese sistema, rendimiento en PC básica e instalador quedan como requisitos de la versión **1.0**. No bloquean los incrementos de desarrollo 0.x.
 
@@ -37,4 +42,4 @@ Por acuerdo del usuario, las comprobaciones de Windows, interfaz en ese sistema,
 
 Python, tkinter, SQLite, openpyxl y python-docx (exportación Word). Desde `lab/`, con dependencias de `requirements.txt` instaladas: `python -m unittest discover -s tests -v`.
 
-Ver [alcance y comprobaciones de 0.6](docs/VERSION_0_6.md), [alcance de 0.5](docs/VERSION_0_5.md), [incremento 0.4](docs/VERSION_0_4.md), [incremento 0.3](docs/VERSION_0_3.md) y [arquitectura online/offline](docs/ARQUITECTURA_ONLINE_OFFLINE.md). Los datos reales y claves quedan fuera del repositorio.
+Ver [alcance y comprobaciones de 0.7](docs/VERSION_0_7.md), [alcance de 0.6](docs/VERSION_0_6.md), [alcance de 0.5](docs/VERSION_0_5.md), [incremento 0.4](docs/VERSION_0_4.md), [incremento 0.3](docs/VERSION_0_3.md) y [arquitectura online/offline](docs/ARQUITECTURA_ONLINE_OFFLINE.md). Los datos reales y claves quedan fuera del repositorio.

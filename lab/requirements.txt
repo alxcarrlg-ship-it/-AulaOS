@@ -1,3 +1,5 @@
 openpyxl>=3.1,<4
 python-docx>=1.2,<2
 # sounddevice (opcional: grabación local de notas de voz)
+
+lxml>=5,<7  # lectura y edición selectiva de plantillas DOCX

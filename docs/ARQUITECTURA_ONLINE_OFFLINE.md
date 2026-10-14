@@ -43,3 +43,8 @@ Fuentes de implementación a consultar:
 ## Incremento 0.6: acciones locales
 
 `actions.py` reconoce comandos explícitos del docente antes de cualquier llamada al proveedor. Las propuestas conservan destino, contenido y estado en SQLite. La confirmación valida nuevamente la identidad y aplica registro + estado en una única transacción. `actions_ui.py` permite revisar, confirmar o cancelar por grupo. Las propuestas no entran al historial enviado a OpenAI. No hay ejecución automática de texto del modelo o documentos. Ver VERSION_0_6.md.
+
+
+## Incremento 0.7: plantillas variables
+
+El formato pertenece al docente/centro, no al programa. `templates.py` guarda bytes DOCX originales y un esquema estructural sin número fijo de columnas. Documentos separados guardan cambios por párrafo y revisiones; la exportación parchea solo texto compatible en una copia del paquete. `templates_ui.py` conecta la biblioteca, editor, borradores y selección explícita de estructura para el chat. La comprensión semántica de requisitos y distribución automática revisable del contenido aún no están implementadas. No confundir conservación estructural con garantía de paginación idéntica.

@@ -1,4 +1,4 @@
-"""AulaOS internal 0.6: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.7: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -10,6 +10,7 @@ from research import domains, safe_url
 from chat import ChatService
 from actions import command
 from actions_ui import open_actions
+from templates_ui import open_templates
 from drafts import Drafts
 from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
@@ -26,7 +27,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.6')
+        self.title('AulaOS · Desarrollo interno 0.7')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -62,7 +63,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.6 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.7 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -145,6 +146,7 @@ class AulaOS(tk.Tk):
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
         ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)
+        ttk.Button(material_bar,text='Plantillas',command=lambda:open_templates(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Acciones',command=lambda:open_actions(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Borradores',command=lambda:open_drafts(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Quitar adjuntos',command=self.clear_attachments).pack(side='left')
