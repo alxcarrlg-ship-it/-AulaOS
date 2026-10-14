@@ -55,3 +55,8 @@ El formato pertenece al docente/centro, no al programa. `templates.py` guarda by
 `folders.py` cataloga nombres y metadatos de carpetas elegidas por grupo. `/buscar` es una ruta local del chat separada del historial online. La lectura y el adjunto son explícitos; el contenido revisado se verifica por digest antes de guardar una copia como material. `folders_ui.py` ejecuta escaneo y lectura en trabajadores con conexión SQLite propia.
 
 `voice.py` graba WAV en memoria o lee audio seleccionado y usa el endpoint de transcripción con una solicitud multipart explícita. `voice_ui.py` mantiene revisión humana antes de pasar el texto al cuadro del chat. No interpreta ni ejecuta transcripciones como acciones. El consumo comparte el límite local, con costo desconocido para audio. El audio no se incluye en SQLite; sí las transcripciones. Windows y micrófono real pendientes.
+
+
+## Avance 0.9: propuestas de contenido por campo
+
+`template_suggestions.py` envía solo petición y campos editables actuales a un proveedor online existente. Valida JSON, IDs y límites, conserva una propuesta sin modificar el documento y expone diferencias contra la revisión base. Aplicar guarda una revisión nueva y marca la propuesta en una transacción; los cambios concurrentes bloquean la aplicación. `template_suggestions_ui.py` permite pedir/reabrir/revisar/aplicar/descartar. Se reutilizan credencial, perfil y límite mensual existentes. No hay ejecución de instrucciones del modelo, búsqueda web ni carga de expedientes implícita. La 0.9 sigue en desarrollo.

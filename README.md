@@ -1,8 +1,10 @@
 # AulaOS
 
-Asistente docente para Windows, en desarrollo. Incremento interno **0.8**: carpetas locales elegidas y voz con transcripción revisable antes de usar el texto. No hay un instalador validado ni se exige que el usuario final instale Python.
+Asistente docente para Windows, en desarrollo. **0.9 en desarrollo**, sobre la base 0.8: primer avance de propuestas de contenido por campo de plantilla, con revisión antes de aplicar. La 0.9 no está cerrada. No hay un instalador validado ni se exige que el usuario final instale Python.
 
 ## Funciones implementadas
+
+- Avance 0.9: pedir una propuesta online para campos existentes de una plantilla, revisar texto anterior/nuevo y aceptar como versión nueva o descartar. Aislamiento por documento y bloqueo si el documento cambió. Aún sin evaluación pedagógica ni prueba real de API.
 
 - Catálogo local de carpetas por grupo, búsqueda por nombre/ruta desde `/buscar`, lectura previa y copias inmutables para adjuntar. Detecta cambios entre vista previa y adjunto.
 - Grabación local hasta 30 segundos, importación de audio y transcripción OpenAI explícita. Revisión editable, historial por grupo y paso al cuadro del chat sin enviar ni ejecutar automáticamente.
@@ -33,11 +35,11 @@ Las transcripciones se guardan localmente por grupo. El audio solo se envía al 
 
 Credencial de sesión o guardado opcional mediante DPAPI de Windows; no se distribuye una clave compartida. `store: false` en la solicitud no promete retención cero del proveedor. El límite local cuenta intentos, no garantiza un máximo de dinero. Los fallos con consumo desconocido se muestran como tal.
 
-El modo sin conexión permite consultar registros, leer y guardar materiales. No resume documentos con IA. La investigación web usa una solicitud independiente: solo la pregunta actual, sin registros, adjuntos ni historial. El docente debe incluir el tema y el nivel en esa pregunta. La exportación 0.5 crea documentos nuevos; no reproduce plantillas originales, logos ni diseños complejos. Las plantillas 0.7 permiten edición selectiva de texto conservando su estructura; no interpretan automáticamente los requisitos de cada campo ni redistribuyen contenido. La transcripción 0.8 es online; no hay reconocimiento de voz offline, conversación de voz en tiempo real, edición PPTX ni acciones arbitrarias en lenguaje libre. Los borradores requieren guardar: se avisa antes de cerrar con cambios, pero no hay autoguardado ante un cierre forzado.
+El modo sin conexión permite consultar registros, leer y guardar materiales. No resume documentos con IA. La investigación web usa una solicitud independiente: solo la pregunta actual, sin registros, adjuntos ni historial. El docente debe incluir el tema y el nivel en esa pregunta. La exportación 0.5 crea documentos nuevos; no reproduce plantillas originales, logos ni diseños complejos. Las plantillas 0.7 permiten edición selectiva de texto conservando su estructura; conservan la estructura; el avance 0.9 añade propuestas de contenido por campo, que requieren revisión y todavía no tienen calidad semántica validada. La transcripción 0.8 es online; no hay reconocimiento de voz offline, conversación de voz en tiempo real, edición PPTX ni acciones arbitrarias en lenguaje libre. Los borradores requieren guardar: se avisa antes de cerrar con cambios, pero no hay autoguardado ante un cierre forzado.
 
 ## Verificación
 
-133 pruebas de lógica/datos/exportación: 132 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+146 pruebas de lógica/datos/exportación: 145 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
 
 Además, tres formatos sintéticos de 3/6/8 columnas renderizados e inspeccionados en Linux para 0.7.
 
@@ -47,4 +49,4 @@ Por acuerdo del usuario, las comprobaciones de Windows, interfaz en ese sistema,
 
 Python, tkinter, SQLite, openpyxl, python-docx, lxml y sounddevice (micrófono). Desde `lab/`, con dependencias de `requirements.txt` instaladas: `python -m unittest discover -s tests -v`.
 
-Ver [alcance y comprobaciones de 0.8](docs/VERSION_0_8.md), [alcance de 0.7](docs/VERSION_0_7.md), [alcance de 0.6](docs/VERSION_0_6.md), [alcance de 0.5](docs/VERSION_0_5.md), [incremento 0.4](docs/VERSION_0_4.md), [incremento 0.3](docs/VERSION_0_3.md) y [arquitectura online/offline](docs/ARQUITECTURA_ONLINE_OFFLINE.md). Los datos reales y claves quedan fuera del repositorio.
+Ver [avance y pendientes de 0.9](docs/VERSION_0_9_PROGRESS.md), [alcance de 0.8](docs/VERSION_0_8.md), [alcance de 0.7](docs/VERSION_0_7.md), [alcance de 0.6](docs/VERSION_0_6.md), [alcance de 0.5](docs/VERSION_0_5.md), [incremento 0.4](docs/VERSION_0_4.md), [incremento 0.3](docs/VERSION_0_3.md) y [arquitectura online/offline](docs/ARQUITECTURA_ONLINE_OFFLINE.md). Los datos reales y claves quedan fuera del repositorio.

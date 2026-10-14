@@ -1,0 +1,84 @@
+"""Review all before/after fields before accepting a versioned template proposal."""
+import json
+import queue
+import threading
+import tkinter as tk
+from tkinter import ttk,messagebox
+from core import Store
+from online import OpenAIProvider,MeteredProvider
+from template_suggestions import TemplateSuggestions
+
+class SuggestionWindow(tk.Toplevel):
+    def __init__(self,editor):
+        super().__init__(editor.app);self.editor=editor;self.app=editor.app;self.gid=editor.gid;self.did=editor.did
+        self.service=TemplateSuggestions(self.app.store);self.busy=False;self.results=queue.Queue();self.rows=[]
+        self.title('Contenido para tu formato · propuesta revisable');self.geometry('980x780')
+        ttk.Label(self,text='Describe tema, nivel, sesiones y requisitos. La IA propondrá cambios solo en campos existentes.',wraplength=920).pack(anchor='w',padx=12,pady=8)
+        self.goal=tk.Text(self,height=4,wrap='word');self.goal.pack(fill='x',padx=12)
+        ttk.Button(self,text='Pedir propuesta con OpenAI',command=self.request).pack(anchor='w',padx=12,pady=6)
+        self.box=tk.Listbox(self,height=5,exportselection=False);self.box.pack(fill='x',padx=12)
+        self.preview=tk.Text(self,wrap='word',state='disabled');self.preview.pack(fill='both',expand=True,padx=12,pady=8)
+        controls=ttk.Frame(self);controls.pack(fill='x',padx=12)
+        self.apply=ttk.Button(controls,text='Aplicar todos los cambios como nueva versión',command=lambda:self.resolve(True));self.apply.pack(side='left')
+        self.reject=ttk.Button(controls,text='Descartar propuesta',command=lambda:self.resolve(False));self.reject.pack(side='left',padx=6)
+        self.notice=tk.StringVar(value='No se modifica el documento al pedir una propuesta. Revisar exactitud pedagógica y distribución antes de entregar.')
+        ttk.Label(self,textvariable=self.notice,wraplength=920).pack(padx=12,pady=8)
+        self.box.bind('<<ListboxSelect>>',self.show);self.refresh();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close);self.poll_id=self.after(100,self.poll)
+    def selected(self):return self.rows[self.box.curselection()[0]] if self.box.curselection() else None
+    def refresh(self):
+        self.rows=self.service.list(self.gid,self.did);self.box.delete(0,'end')
+        for row in self.rows:self.box.insert('end',f"#{row['id']} · base v{row['base_revision']} · "+{'pending':'Por revisar','applied':'Aplicada','rejected':'Descartada'}[row['state']]+' · '+row['created_at'])
+        if self.rows:self.box.selection_set(0)
+        self.show()
+    def show(self,event=None):
+        row=self.selected();text='Las propuestas y su estado se conservan en este documento.'
+        pending=bool(row and row['state']=='pending' and not self.busy)
+        self.apply.configure(state='normal' if pending else 'disabled');self.reject.configure(state='normal' if pending else 'disabled')
+        if row:
+            text='PETICIÓN\n'+row['goal']+'\n\nNOTAS DE LA IA (revisar)\n'+row['notes']+'\n\n'
+            differences=self.service.review(self.gid,row['id'])
+            if not differences:text+='La IA no propuso cambios de texto. Revisa sus notas.'
+            for change in differences:text+=change['location']+' · '+change['id']+'\nANTES:\n'+change['before']+'\nPROPUESTA:\n'+change['after']+'\n\n'
+        self.preview.configure(state='normal');self.preview.delete('1.0','end');self.preview.insert('1.0',text);self.preview.configure(state='disabled')
+    def request(self):
+        if self.busy:return
+        if not self.editor.winfo_exists():messagebox.showinfo('Editor cerrado','Abre el documento otra vez para pedir una propuesta sobre su versión actual.',parent=self);return
+        if not self.editor.save():return
+        goal=self.goal.get('1.0','end-1c').strip();revision=self.editor.revision
+        try:self.service.context(self.gid,self.did,goal,revision)
+        except Exception as exc:messagebox.showerror('Propuesta',str(exc),parent=self);return
+        if not self.app.api_key:self.app.configure_online()
+        if not self.app.api_key:return
+        if not messagebox.askyesno('Enviar campos a OpenAI','Se enviarán tu petición, ubicaciones y textos actuales de todos los párrafos editables de esta plantilla. Pueden contener datos personales. No se envían el Word, imágenes, otros registros ni historial. La consulta consume API. ¿Continuar?',parent=self):return
+        settings=dict(self.app.settings);key=self.app.api_key;db=self.app.store.db_path;gid=self.gid;did=self.did
+        self.busy=True;self.show();self.notice.set('Preparando propuesta… El documento no se modificará hasta que la aceptes.')
+        def work():
+            store=None
+            try:
+                store=Store(db);provider=MeteredProvider(store,OpenAIProvider(key,settings['profile'],settings['max_output_tokens']),settings['monthly_limit'])
+                sid=TemplateSuggestions(store).propose(gid,did,goal,revision,provider);self.results.put((sid,None))
+            except Exception as exc:self.results.put((None,str(exc)))
+            finally:
+                if store:store.close()
+        threading.Thread(target=work,daemon=True).start()
+    def resolve(self,apply):
+        if self.busy:return
+        row=self.selected()
+        if not row:return
+        if apply and self.editor.winfo_exists():
+            self.editor.capture()
+            if self.editor.changes!=self.editor.saved:messagebox.showinfo('Cambios locales','Guarda tus cambios en el editor antes de continuar. Si cambió la versión, tendrás que pedir una propuesta nueva.',parent=self);return
+        try:revision=self.service.resolve(self.gid,row['id'],apply)
+        except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
+        if apply and self.editor.winfo_exists():
+            doc=self.editor.service.document(self.gid,self.did);self.editor.revision=doc['revision'];self.editor.changes=json.loads(doc['changes']);self.editor.saved=dict(self.editor.changes);self.editor.active=None;self.editor.select();self.editor.notice.set(f'Propuesta aplicada como versión {revision}. Revisa el Word exportado.')
+        self.refresh();self.notice.set(f'Guardada nueva versión {revision}.' if apply else 'Propuesta descartada. Documento intacto.')
+    def poll(self):
+        try:sid,error=self.results.get_nowait()
+        except queue.Empty:pass
+        else:
+            self.busy=False;self.app.refresh_usage();self.refresh();self.notice.set(error or 'Propuesta guardada. Revisa TODOS los cambios antes de aplicarlos.')
+        self.poll_id=self.after(100,self.poll)
+    def try_close(self):
+        if self.busy:messagebox.showinfo('Solicitud en curso','Espera a que termine; no habrá reintentos automáticos.',parent=self);return False
+        self.after_cancel(self.poll_id);self.app.draft_editors.discard(self);self.destroy();return True

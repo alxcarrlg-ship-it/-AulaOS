@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from templates import Templates
 from materials import Materials
+from template_suggestions_ui import SuggestionWindow
 
 ERRORS=(ValueError,OSError,sqlite3.Error)
 
@@ -85,10 +86,13 @@ class TemplateEditor(tk.Toplevel):
         self.body=tk.Text(self,wrap='word',undo=True);self.body.pack(fill='both',expand=True,padx=12,pady=8)
         row=ttk.Frame(self);row.pack(fill='x',padx=12)
         for name,fn in [('Guardar versión',self.save),('Guardar copia',self.copy),('Restaurar versión',self.restore),('Texto de un borrador',self.insert_draft),('Exportar Word',self.export)]:ttk.Button(row,text=name,command=fn).pack(side='left',padx=3)
+        ttk.Button(self,text='Proponer contenido con IA / revisar propuestas',command=self.suggest).pack(anchor='w',padx=12,pady=4)
         self.notice=tk.StringVar(value=f'Versión {self.revision} · formato: {template["name"]}')
         ttk.Label(self,textvariable=self.notice,wraplength=940).pack(anchor='w',padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.select);self.box.selection_set(0);self.select()
         self.protocol('WM_DELETE_WINDOW',self.try_close);app.draft_editors.add(self)
+    def suggest(self):
+        if self.save():SuggestionWindow(self)
     def capture(self):
         if self.active is not None:
             f=self.fields[self.active];value=self.body.get('1.0','end-1c')
