@@ -1,4 +1,4 @@
-"""AulaOS internal 0.4: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.5: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -8,6 +8,8 @@ import re
 import webbrowser
 from research import domains, safe_url
 from chat import ChatService
+from drafts import Drafts
+from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
 from settings import Settings, CredentialVault
 import tkinter as tk
@@ -22,12 +24,13 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.4')
+        self.title('AulaOS · Desarrollo interno 0.5')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
         self.chat_service=ChatService(self.store)
         self.chat_service.recover_interrupted()
+        self.drafts=Drafts(self.store);self.draft_editors=set()
         self.settings_store=Settings(APP_DIR);self.settings=self.settings_store.load()
         self.vault=CredentialVault(APP_DIR);self.api_key='';self.credential_notice=''
         try:self.api_key=self.vault.load()
@@ -57,7 +60,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.4 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.5 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -140,6 +143,7 @@ class AulaOS(tk.Tk):
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
         ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)
+        ttk.Button(material_bar,text='Borradores',command=lambda:open_drafts(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Quitar adjuntos',command=self.clear_attachments).pack(side='left')
         self.attachment_text=tk.StringVar(value='Sin adjuntos para la próxima consulta')
         ttk.Label(self.tab_chat,textvariable=self.attachment_text,wraplength=950).pack(anchor='w')
@@ -215,6 +219,13 @@ class AulaOS(tk.Tk):
             if path:
                 try:Path(path).write_text(r['content'],encoding='utf-8')
                 except OSError as exc:messagebox.showerror('Exportación',str(exc),parent=win)
+        def edit_copy():
+            ids=selected()
+            if not ids:return
+            try:did=self.drafts.from_material(gid,ids[0])
+            except ValueError as exc:messagebox.showerror('Borrador',str(exc),parent=win);return
+            DraftEditor(self,gid,did)
+        ttk.Button(win,text='Editar una copia del material seleccionado',command=edit_copy).pack(anchor='w',padx=10,pady=5)
         controls=ttk.Frame(win);controls.pack(fill='x',padx=10,pady=10)
         for title,command in [('Importar archivo',import_doc),('Adjuntar seleccionados',attach),('Guardar fragmento',save_fragment),('Exportar texto',export)]:
             ttk.Button(controls,text=title,command=command).pack(side='left',padx=3)
@@ -225,9 +236,12 @@ class AulaOS(tk.Tk):
         if not answers:self.toast('Todavía no hay una respuesta para guardar.');return
         title=simpledialog.askstring('Guardar respuesta como material','Título:',parent=self)
         if title:
-            try:self.chat_service.materials.save(self.gid,title,answers[-1]['content'])
+            try:
+                mid=self.chat_service.materials.save(self.gid,title,answers[-1]['content'])
+                did=self.drafts.from_material(self.gid,mid)
             except ValueError as exc:messagebox.showerror('Material',str(exc),parent=self);return
-            self.toast('Respuesta guardada en Materiales de este grupo.')
+            self.toast('Respuesta guardada; copia editable abierta.')
+            DraftEditor(self,self.gid,did)
 
     def refresh_usage(self):
         u=self.usage.summary()
@@ -281,6 +295,8 @@ class AulaOS(tk.Tk):
         if self.chat_busy:
             messagebox.showinfo('Solicitud en curso','Espera a que termine la solicitud antes de cerrar. Los registros ya están guardados.',parent=self)
             return
+        for editor in list(self.draft_editors):
+            if editor.winfo_exists() and not editor.try_close():return
         try:self.store.backup()
         except Exception as exc:messagebox.showwarning('Respaldo pendiente',f'No pude crear el respaldo automático: {exc}',parent=self)
         self.store.close();self.destroy()
