@@ -1,4 +1,4 @@
-"""AulaOS internal 0.7: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.8: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -11,6 +11,9 @@ from chat import ChatService
 from actions import command
 from actions_ui import open_actions
 from templates_ui import open_templates
+from folders_ui import FolderWindow
+from folders import is_search
+from voice_ui import VoiceWindow
 from drafts import Drafts
 from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
@@ -27,7 +30,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.7')
+        self.title('AulaOS · Desarrollo interno 0.8')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -41,7 +44,7 @@ class AulaOS(tk.Tk):
         except RuntimeError:self.credential_notice='La clave guardada requiere Windows. Modo básico disponible.'
         if not self.api_key:self.settings['mode']='Básico sin conexión'
         self.usage=UsageLedger(self.store)
-        self.chat_busy=False;self.chat_results=queue.Queue();self.audio_results=queue.Queue()
+        self.chat_busy=False;self.chat_results=queue.Queue();self.microphone_busy=False
         self.attachments={}
         self.gid=None;self.select_student=None
         self.group_ids={}
@@ -63,7 +66,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.7 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.8 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -114,7 +117,7 @@ class AulaOS(tk.Tk):
         actions=ttk.Frame(self.tab_notes);actions.pack(fill='x')
         ttk.Button(actions,text='Guardar observación',command=self.save_event).pack(side='left')
         ttk.Button(actions,text='Exportar historial HTML',command=self.export_history).pack(side='left',padx=7)
-        ttk.Button(actions,text='Grabar nota de voz (10 s, opcional)',command=self.record_audio).pack(side='left',padx=7)
+        ttk.Button(actions,text='Voz: grabar / transcribir',command=self.record_audio).pack(side='left',padx=7)
         ttk.Label(self.tab_notes,text='Historial del estudiante seleccionado:').pack(anchor='w',pady=(14,4))
         self.timeline=tk.Text(self.tab_notes,font=('Consolas',10),wrap='word',state='disabled');self.timeline.pack(fill='both',expand=True)
     def _tasks(self):
@@ -143,6 +146,9 @@ class AulaOS(tk.Tk):
         ttk.Label(web_row,text='Dominios opcionales:').pack(side='left',padx=5)
         self.research_domains=tk.StringVar();ttk.Entry(web_row,textvariable=self.research_domains,width=32).pack(side='left')
         self.usage_text=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.usage_text,foreground='#506980').pack(anchor='w')
+        local_bar=ttk.Frame(self.tab_chat);local_bar.pack(fill='x',pady=4)
+        ttk.Button(local_bar,text='Carpetas / buscar archivos',command=lambda:FolderWindow(self,self.gid)).pack(side='left')
+        ttk.Button(local_bar,text='Voz / dictado',command=self.record_audio).pack(side='left',padx=5)
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
         ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)
@@ -154,7 +160,7 @@ class AulaOS(tk.Tk):
         ttk.Label(self.tab_chat,textvariable=self.attachment_text,wraplength=950).pack(anchor='w')
         self.chatlog=tk.Text(self.tab_chat,font=('Segoe UI',11),wrap='word',state='disabled')
         self.chatlog.pack(fill='both',expand=True,pady=7)
-        ttk.Label(self.tab_chat,text='Acciones sin internet: /acciones muestra ejemplos y formatos.',foreground='#476682').pack(anchor='w')
+        ttk.Label(self.tab_chat,text='Sin internet: /acciones muestra formatos; /buscar nombre busca archivos en tus carpetas.',foreground='#476682').pack(anchor='w')
         row=ttk.Frame(self.tab_chat);row.pack(fill='x',pady=6)
         self.chat_msg=tk.StringVar();ent=ttk.Entry(row,textvariable=self.chat_msg)
         ent.pack(side='left',fill='x',expand=True,padx=(0,8));ent.bind('<Return>',lambda e:self.ask())
@@ -418,27 +424,8 @@ class AulaOS(tk.Tk):
         p=filedialog.asksaveasfilename(defaultextension='.html',filetypes=[('Informe HTML','*.html')],initialfile='historial_docente.html')
         if p:self.store.export_html(sid,p);self.toast('Historial exportado. Verifica los datos antes de compartirlo.')
     def record_audio(self):
-        sid=self.students_by_name.get(self.student_note_box.get())
-        if not sid:messagebox.showwarning('Alumno','Selecciona el alumno antes de grabar.',parent=self);return
-        try:
-            import sounddevice as sd
-        except ImportError:
-            messagebox.showinfo('Audio opcional','La grabación local necesita el complemento gratuito sounddevice. Instálalo con: python -m pip install sounddevice\n\nLa transcripción todavía no está implementada.',parent=self);return
-        folder=APP_DIR/'audios';folder.mkdir(exist_ok=True)
-        path=folder/f'{sid}_{dt.datetime.now().strftime("%Y%m%d_%H%M%S")}.wav'
-        self.toast('Grabando audio durante 10 segundos…')
-        def work():
-            try:
-                import wave
-                sample_rate=16000
-                audio=sd.rec(10*sample_rate,samplerate=sample_rate,channels=1,dtype='int16');sd.wait()
-                with wave.open(str(path),'wb') as f:f.setnchannels(1);f.setsampwidth(2);f.setframerate(sample_rate);f.writeframes(audio.tobytes())
-                self.after(0,lambda:self.audio_done(sid,path))
-            except Exception as e:self.after(0,lambda err=str(e):messagebox.showerror('Grabación fallida',err,parent=self))
-        threading.Thread(target=work,daemon=True).start()
-    def audio_done(self,sid,path):
-        self.store.log_event(self.gid,sid,self.get_day() or today(),'Audio por transcribir',f'Archivo local: {path.name} (requiere revisión y transcripción).')
-        self.load_timeline();self.toast(f'Audio local guardado: {path.name}. Sin transcripción automática todavía.')
+        VoiceWindow(self,self.gid)
+
     def backup_now(self):
         try:
             location=self.store.backup()
@@ -486,7 +473,7 @@ class AulaOS(tk.Tk):
         for item in self.chat_service.history(self.gid):
             label='Docente' if item['role']=='user' else 'AulaOS'
             if item['state']!='complete':label+=' · '+{'failed':'no completado','pending':'en curso'}.get(item['state'],item['state'])
-            label+=' · '+{'online':'OpenAI','basic':'básico','ai':'local','legacy':'anterior','research':'investigación web'}.get(item['source'],item['source'])
+            label+=' · '+{'online':'OpenAI','basic':'básico','ai':'local','legacy':'anterior','research':'investigación web','files':'archivos locales','action':'acciones locales'}.get(item['source'],item['source'])
             self.append_chat(label,item['content'])
             ids=[r[0] for r in self.store.con.execute('SELECT material_id FROM message_materials WHERE message_id=?',(item['id'],))]
             if ids:self.append_chat('Adjuntos',', '.join(f'[M{i}]' for i in ids))
@@ -504,7 +491,7 @@ class AulaOS(tk.Tk):
         material_ids=list(self.attachments.get(self.gid,[]))
         gid=self.gid;settings=dict(self.settings);mode=self.chat_mode.get();api_key=self.api_key
         research=self.research_mode.get();allowed=[]
-        if command(question):mode='Básico sin conexión';research=False;material_ids=[]
+        if command(question) or is_search(question):mode='Básico sin conexión';research=False;material_ids=[]
         if retry_id is not None:
             original=next(m for m in self.chat_service.history(gid) if m['id']==retry_id)
             saved=json.loads(original['request_options']);research=bool(saved.get('research'));allowed=saved.get('domains',[])
@@ -520,7 +507,7 @@ class AulaOS(tk.Tk):
         if retry_id is None:
             try:self.chat_service.materials.context(gid,material_ids)
             except ValueError as exc:messagebox.showerror('Adjuntos',str(exc),parent=self);return
-            self.clear_attachments()
+            if not command(question) and not is_search(question):self.clear_attachments()
         self.research_mode.set(False);self.refresh_mode_hint()
         self.chat_busy=True;self.chat_send.configure(state='disabled');self.retry_button.configure(state='disabled')
         if retry_id is None:self.chat_msg.set('');self.append_chat('Docente',question)

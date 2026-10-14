@@ -48,3 +48,10 @@ Fuentes de implementación a consultar:
 ## Incremento 0.7: plantillas variables
 
 El formato pertenece al docente/centro, no al programa. `templates.py` guarda bytes DOCX originales y un esquema estructural sin número fijo de columnas. Documentos separados guardan cambios por párrafo y revisiones; la exportación parchea solo texto compatible en una copia del paquete. `templates_ui.py` conecta la biblioteca, editor, borradores y selección explícita de estructura para el chat. La comprensión semántica de requisitos y distribución automática revisable del contenido aún no están implementadas. No confundir conservación estructural con garantía de paginación idéntica.
+
+
+## Incremento 0.8: carpetas y voz
+
+`folders.py` cataloga nombres y metadatos de carpetas elegidas por grupo. `/buscar` es una ruta local del chat separada del historial online. La lectura y el adjunto son explícitos; el contenido revisado se verifica por digest antes de guardar una copia como material. `folders_ui.py` ejecuta escaneo y lectura en trabajadores con conexión SQLite propia.
+
+`voice.py` graba WAV en memoria o lee audio seleccionado y usa el endpoint de transcripción con una solicitud multipart explícita. `voice_ui.py` mantiene revisión humana antes de pasar el texto al cuadro del chat. No interpreta ni ejecuta transcripciones como acciones. El consumo comparte el límite local, con costo desconocido para audio. El audio no se incluye en SQLite; sí las transcripciones. Windows y micrófono real pendientes.
