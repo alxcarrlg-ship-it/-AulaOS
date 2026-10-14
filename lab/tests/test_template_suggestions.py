@@ -141,3 +141,42 @@ class SuggestionsTest(unittest.TestCase):
         fields=inspect_template(path.read_bytes())['fields']
         original={f['id']:f['text'] for f in self.schema['fields']}
         for field in fields:self.assertEqual(field['text'],'Texto revisado' if field['id']==self.key else original[field['id']])
+
+
+    def test_review_draft_survives_reopen_without_applying(self):
+        sid=self.propose();self.service.save_review(self.gid,sid,[],{self.key:'Mi texto pendiente'})
+        other=Store(self.root/'db.sqlite3')
+        try:
+            draft=TemplateSuggestions(other).review_draft(self.gid,sid)
+            self.assertEqual(draft['selected'],[]);self.assertEqual(draft['values'],{self.key:'Mi texto pendiente'})
+        finally:other.close()
+        self.assertEqual(self.templates.document(self.gid,self.did)['revision'],1)
+        self.assertEqual(self.service.get(self.gid,sid)['state'],'pending')
+
+    def test_review_draft_conflicts_preserve_latest(self):
+        sid=self.propose();self.service.save_review(self.gid,sid,[self.key],{self.key:'Uno'})
+        with self.assertRaises(RevisionConflict):self.service.save_review(self.gid,sid,[],{self.key:'Dos'},0)
+        with self.assertRaises(RevisionConflict):self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Dos'},0)
+        self.assertEqual(self.service.review_draft(self.gid,sid)['values'][self.key],'Uno')
+        self.assertEqual(self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Uno'},1),2)
+
+    def test_review_draft_scope_and_invalid_payload(self):
+        sid=self.propose()
+        with self.assertRaises(ValueError):self.service.review_draft(self.other,sid)
+        with self.assertRaises(ValueError):self.service.save_review(self.other,sid,[],{self.key:'x'})
+        for keys,values in [(['unknown'],{self.key:'x'}),([self.key,self.key],{self.key:'x'}),([],{}),([],{self.key:None}),([],{self.key:'x\x00'})]:
+            with self.assertRaises(ValueError):self.service.save_review(self.gid,sid,keys,values)
+        self.assertIsNone(self.service.review_draft(self.gid,sid))
+
+    def test_review_draft_resolved_is_readable_but_not_writable(self):
+        sid=self.propose();self.service.save_review(self.gid,sid,[],{self.key:'Pendiente'})
+        self.service.resolve(self.gid,sid,False)
+        self.assertEqual(self.service.review_draft(self.gid,sid)['values'][self.key],'Pendiente')
+        with self.assertRaises(ValueError):self.service.save_review(self.gid,sid,[],{self.key:'Otro'},1)
+
+    def test_review_draft_stale_document_keeps_work_without_applying(self):
+        sid=self.propose();self.templates.save(self.gid,self.did,{self.key:'Nueva versión'},1)
+        self.service.save_review(self.gid,sid,[self.key],{self.key:'Revisión pendiente'})
+        with self.assertRaises(RevisionConflict):self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Revisión pendiente'},1)
+        self.assertEqual(self.service.review_draft(self.gid,sid)['values'][self.key],'Revisión pendiente')
+        self.assertEqual(json.loads(self.templates.document(self.gid,self.did)['changes'])[self.key],'Nueva versión')

@@ -82,7 +82,8 @@ class SuggestionWindow(tk.Toplevel):
             self.editor.capture()
             if self.editor.changes!=self.editor.saved:messagebox.showinfo('Cambios locales','Guarda tus cambios en el editor antes de continuar. Si cambió la versión, tendrás que pedir una propuesta nueva.',parent=self);return
         if apply:
-            dialog=ReviewChanges(self,self.service.review(self.gid,row['id']),lambda keys,edits:self.service.resolve(self.gid,row['id'],True,keys,edits))
+            dialog=ReviewChanges(self,self.service.review(self.gid,row['id']),lambda keys,edits:self.service.resolve(self.gid,row['id'],True,keys,edits,dialog.draft_revision),
+                self.service.review_draft(self.gid,row['id']),lambda keys,values,version:self.service.save_review(self.gid,row['id'],keys,values,version))
             self.wait_window(dialog)
             if dialog.result is None:return
             revision=dialog.result
@@ -105,9 +106,12 @@ class SuggestionWindow(tk.Toplevel):
 
 class ReviewChanges(tk.Toplevel):
     """Local review only; the parent commits the chosen text atomically."""
-    def __init__(self,parent,changes,on_apply):
+    def __init__(self,parent,changes,on_apply,draft,on_save):
         super().__init__(parent);self.result=None;self.changes=changes;self.active=None;self.on_apply=on_apply
         self.values={c['id']:c['after'] for c in changes};self.included=set(self.values)
+        self.on_save=on_save;self.draft_revision=draft['revision'] if draft else 0
+        if draft:self.values=dict(draft['values']);self.included=set(draft['selected'])
+        self.saved_values=dict(self.values);self.saved_included=set(self.included)
         self.title('Revisar campos antes de guardar');self.geometry('900x700');self.transient(parent)
         ttk.Label(self,text='Selecciona cada campo para revisarlo. Desmarca los que quieras omitir y corrige el texto.\nAl aplicar se cierra esta propuesta; los campos omitidos conservan su contenido.',wraplength=860).pack(anchor='w',padx=12,pady=8)
         self.box=tk.Listbox(self,height=6,exportselection=False);self.box.pack(fill='x',padx=12)
@@ -121,7 +125,8 @@ class ReviewChanges(tk.Toplevel):
         self.count=tk.StringVar();ttk.Label(self,textvariable=self.count).pack(anchor='w',padx=12)
         controls=ttk.Frame(self);controls.pack(fill='x',padx=12,pady=8)
         ttk.Button(controls,text='Aplicar selección como nueva versión',command=self.accept).pack(side='left')
-        ttk.Button(controls,text='Volver sin aplicar',command=self.cancel).pack(side='left',padx=8)
+        ttk.Button(controls,text='Guardar para continuar después',command=self.save).pack(side='left',padx=8)
+        ttk.Button(controls,text='Cerrar revisión',command=self.cancel).pack(side='left',padx=8)
         self.box.bind('<<ListboxSelect>>',self.select);self.protocol('WM_DELETE_WINDOW',self.cancel)
         if changes:self.box.selection_set(0);self.select()
         self.grab_set()
@@ -145,8 +150,18 @@ class ReviewChanges(tk.Toplevel):
         try:self.result=self.on_apply(keys,{k:self.values[k] for k in keys})
         except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
         self.destroy()
+    def save(self):
+        self.capture()
+        keys=[c['id'] for c in self.changes if c['id'] in self.included]
+        try:self.draft_revision=self.on_save(keys,dict(self.values),self.draft_revision)
+        except Exception as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return False
+        self.saved_values=dict(self.values);self.saved_included=set(self.included)
+        self.count.set('Revisión guardada para continuar después. El documento aún no cambia.')
+        return True
     def cancel(self):
         self.capture()
-        if self.included!=set(self.values) or any(self.values[c['id']]!=c['after'] for c in self.changes):
-            if not messagebox.askyesno('Volver sin aplicar','Se perderán tus ediciones y selección de esta revisión. La propuesta original seguirá guardada. ¿Volver?',parent=self):return
+        if self.included!=self.saved_included or self.values!=self.saved_values:
+            answer=messagebox.askyesnocancel('Guardar revisión','¿Guardar tus correcciones y selección para continuar después? No se aplicarán al documento.',parent=self)
+            if answer is None:return
+            if answer and not self.save():return
         self.destroy()

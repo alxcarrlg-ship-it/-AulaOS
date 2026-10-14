@@ -42,6 +42,10 @@ class TemplateSuggestions:
         columns={r[1] for r in store.con.execute('PRAGMA table_info(template_suggestions)')}
         if 'sources_json' not in columns:store.con.execute("ALTER TABLE template_suggestions ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]'")
         if 'applied_changes' not in columns:store.con.execute("ALTER TABLE template_suggestions ADD COLUMN applied_changes TEXT")
+        store.con.execute("""CREATE TABLE IF NOT EXISTS template_review_drafts(
+            suggestion_id INTEGER PRIMARY KEY REFERENCES template_suggestions(id),
+            selected_json TEXT NOT NULL,values_json TEXT NOT NULL,
+            revision INTEGER NOT NULL,updated_at TEXT NOT NULL)""")
         store.con.commit()
     def context(self,gid,did,goal,expected_revision,material_ids=None):
         goal=goal.strip()
@@ -85,6 +89,29 @@ class TemplateSuggestions:
         old={f['id']:f['text'] for f in schema['fields']};old.update(json.loads(doc['changes']))
         locations={f['id']:f['location'] for f in schema['fields']}
         return [{'id':key,'location':locations[key],'before':old[key],'after':value} for key,value in json.loads(proposal['changes']).items()]
+    def review_draft(self,gid,sid):
+        self.get(gid,sid)
+        row=self.store.con.execute('SELECT * FROM template_review_drafts WHERE suggestion_id=?',(sid,)).fetchone()
+        if row is None:return None
+        return dict(selected=json.loads(row['selected_json']),values=json.loads(row['values_json']),revision=row['revision'],updated_at=row['updated_at'])
+    def save_review(self,gid,sid,selected,values,expected_revision=0):
+        """Save local work, including excluded text; never apply document changes."""
+        con=self.store.con;con.execute('BEGIN IMMEDIATE')
+        try:
+            proposal=self.get(gid,sid)
+            if proposal['state']!='pending':raise ValueError('La propuesta ya fue resuelta; no se puede guardar otra revisión manual.')
+            proposed=json.loads(proposal['changes'])
+            if not isinstance(selected,list) or any(not isinstance(k,str) for k in selected) or len(set(selected))!=len(selected) or not set(selected)<=set(proposed):raise ValueError('Selección inválida.')
+            if not isinstance(values,dict) or set(values)!=set(proposed):raise ValueError('La revisión debe conservar todos los campos de la propuesta.')
+            doc=self.templates.document(gid,proposal['document_id'])
+            template=self.templates.get(gid,doc['template_id'])
+            validate_changes(json.loads(template['schema_json']),values)
+            current=self.review_draft(gid,sid);revision=current['revision'] if current else 0
+            if revision!=expected_revision:raise RevisionConflict('Otra ventana guardó esta revisión. Cierra y vuelve a abrir para recuperar la copia guardada.')
+            revision+=1
+            con.execute('INSERT OR REPLACE INTO template_review_drafts VALUES(?,?,?,?,?)',(sid,json.dumps(selected),json.dumps(values,ensure_ascii=False),revision,now()))
+            con.commit();return revision
+        except Exception:con.rollback();raise
     def accepted_changes(self,proposal,selected_keys=None,overrides=None):
         proposed=json.loads(proposal['changes'])
         keys=list(proposed) if selected_keys is None else selected_keys
@@ -97,7 +124,7 @@ class TemplateSuggestions:
         allowed={s['source'] for s in json.loads(proposal['sources_json'])}
         if not set(re.findall(r'\[(M\d+)\]','\n'.join(accepted.values())))<=allowed:raise ValueError('Los cambios citan materiales que no fueron seleccionados.')
         return accepted
-    def resolve(self,gid,sid,apply=False,selected_keys=None,overrides=None):
+    def resolve(self,gid,sid,apply=False,selected_keys=None,overrides=None,expected_review_revision=None):
         con=self.store.con;con.execute('BEGIN IMMEDIATE')
         try:
             proposal=self.get(gid,sid)
@@ -110,6 +137,9 @@ class TemplateSuggestions:
                 raise ValueError('La propuesta ya fue resuelta.')
             revision=None;accepted=None
             if apply:
+                if expected_review_revision is not None:
+                    draft=self.review_draft(gid,sid)
+                    if (draft['revision'] if draft else 0)!=expected_review_revision:raise RevisionConflict('Otra ventana guardó la revisión manual. Vuelve a abrirla antes de aplicar.')
                 doc=self.templates.document(gid,proposal['document_id'])
                 if doc['current_revision']!=proposal['base_revision']:raise RevisionConflict('El documento cambió desde la propuesta. Descártala y genera otra sobre la versión actual.')
                 accepted=self.accepted_changes(proposal,selected_keys,overrides)
