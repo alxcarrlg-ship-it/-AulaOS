@@ -1,4 +1,4 @@
-"""AulaOS internal 0.5: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.6: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -8,6 +8,8 @@ import re
 import webbrowser
 from research import domains, safe_url
 from chat import ChatService
+from actions import command
+from actions_ui import open_actions
 from drafts import Drafts
 from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
@@ -24,7 +26,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.5')
+        self.title('AulaOS · Desarrollo interno 0.6')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -60,7 +62,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.5 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.6 · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -143,12 +145,14 @@ class AulaOS(tk.Tk):
         material_bar=ttk.Frame(self.tab_chat);material_bar.pack(fill='x',pady=5)
         ttk.Button(material_bar,text='Materiales / adjuntar',command=self.open_materials).pack(side='left')
         ttk.Button(material_bar,text='Guardar respuesta',command=self.save_response).pack(side='left',padx=5)
+        ttk.Button(material_bar,text='Acciones',command=lambda:open_actions(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Borradores',command=lambda:open_drafts(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(material_bar,text='Quitar adjuntos',command=self.clear_attachments).pack(side='left')
         self.attachment_text=tk.StringVar(value='Sin adjuntos para la próxima consulta')
         ttk.Label(self.tab_chat,textvariable=self.attachment_text,wraplength=950).pack(anchor='w')
         self.chatlog=tk.Text(self.tab_chat,font=('Segoe UI',11),wrap='word',state='disabled')
         self.chatlog.pack(fill='both',expand=True,pady=7)
+        ttk.Label(self.tab_chat,text='Acciones sin internet: /acciones muestra ejemplos y formatos.',foreground='#476682').pack(anchor='w')
         row=ttk.Frame(self.tab_chat);row.pack(fill='x',pady=6)
         self.chat_msg=tk.StringVar();ent=ttk.Entry(row,textvariable=self.chat_msg)
         ent.pack(side='left',fill='x',expand=True,padx=(0,8));ent.bind('<Return>',lambda e:self.ask())
@@ -498,6 +502,7 @@ class AulaOS(tk.Tk):
         material_ids=list(self.attachments.get(self.gid,[]))
         gid=self.gid;settings=dict(self.settings);mode=self.chat_mode.get();api_key=self.api_key
         research=self.research_mode.get();allowed=[]
+        if command(question):mode='Básico sin conexión';research=False;material_ids=[]
         if retry_id is not None:
             original=next(m for m in self.chat_service.history(gid) if m['id']==retry_id)
             saved=json.loads(original['request_options']);research=bool(saved.get('research'));allowed=saved.get('domains',[])
@@ -542,7 +547,9 @@ class AulaOS(tk.Tk):
                     self.chat_mode.set('Básico sin conexión');self.settings['mode']='Básico sin conexión';self.settings_store.save(self.settings);self.refresh_mode_hint()
                 self.toast(error)
             elif gid!=self.gid:self.toast('Respuesta guardada en el grupo de origen.')
-            else:self.toast('Respuesta guardada localmente.')
+            else:
+                self.toast('Respuesta guardada localmente.')
+                if any(r['state']=='pending' for r in self.chat_service.actions.list(gid)):open_actions(self,gid)
         self.after(100,self.poll_chat)
 
 if __name__=='__main__':AulaOS().mainloop()

@@ -6,6 +6,7 @@ from core import now
 from online import OnlineError
 from materials import Materials
 from research import research_prompt
+from actions import Actions, command
 
 class OllamaProvider:
     def __init__(self, model, endpoint='http://127.0.0.1:11434', timeout=90, options=None, think=None):
@@ -46,6 +47,7 @@ class ChatService:
             if name not in columns:self.store.con.execute(f'ALTER TABLE messages ADD COLUMN {name} {definition}')
         self.store.con.commit()
         self.materials=Materials(store)
+        self.actions=Actions(store)
 
     def recover_interrupted(self):
         # Only called once when the application starts, never by worker connections.
@@ -80,16 +82,19 @@ class ChatService:
     def send(self,gid,text,provider=None,include_records=True,retry_id=None,material_ids=None):
         text=text.strip()
         if not text:raise ValueError('Mensaje vacío')
+        local_action=command(text) is not None
+        if local_action:
+            provider=None;material_ids=[];include_records=False
         research=bool(getattr(provider,'research',False))
         options=getattr(provider,'request_options',{})
-        context={} if research else self.context(gid) if provider is None or include_records else {'scope':'Conversación del grupo activo','records_included':False}
+        context={} if research or local_action else self.context(gid) if provider is None or include_records else {'scope':'Conversación del grupo activo','records_included':False}
         cid=self.conversation(gid)
         if retry_id is not None:
             material_ids=[r[0] for r in self.store.con.execute('SELECT material_id FROM message_materials WHERE message_id=?',(retry_id,))]
         material_ids=list(dict.fromkeys(material_ids or []))
         if research and material_ids:raise ValueError('La investigación web no admite adjuntos; quítalos o usa el chat normal.')
         documents=self.materials.context(gid,material_ids)
-        source=getattr(provider,'source','ai') if provider is not None else 'basic'
+        source='action' if local_action else getattr(provider,'source','ai') if provider is not None else 'basic'
         prior=[{'role':x['role'],'content':x['content']} for x in self.history(gid)
                if x['state']=='complete' and x['source']==source][-40:]
         if research:prior=[]
@@ -115,7 +120,10 @@ class ChatService:
         except Exception:
             self.store.con.rollback();raise
         try:
-            if provider is None:
+            if local_action:
+                try:answer=self.actions.propose(gid,text,request_id=mid)
+                except ValueError as exc:answer='No se preparó ninguna acción: '+str(exc)
+            elif provider is None:
                 answer=self.basic_answer(gid,text)
                 if documents:
                     answer='Materiales disponibles sin conexión (sin análisis de IA):\n'+ '\n'.join(f"[{d['source']}] {d['title']}" for d in documents)+'\nPuedes leerlos completos en Materiales.\n\n'+answer

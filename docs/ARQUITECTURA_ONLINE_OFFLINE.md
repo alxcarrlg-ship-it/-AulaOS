@@ -38,3 +38,8 @@ Incremento interno 0.5: chat persistente, funciones básicas, materiales locales
 Fuentes de implementación a consultar:
 - https://developers.openai.com/api/docs/pricing
 - https://developers.openai.com/api/reference/resources/responses/methods/create
+
+
+## Incremento 0.6: acciones locales
+
+`actions.py` reconoce comandos explícitos del docente antes de cualquier llamada al proveedor. Las propuestas conservan destino, contenido y estado en SQLite. La confirmación valida nuevamente la identidad y aplica registro + estado en una única transacción. `actions_ui.py` permite revisar, confirmar o cancelar por grupo. Las propuestas no entran al historial enviado a OpenAI. No hay ejecución automática de texto del modelo o documentos. Ver VERSION_0_6.md.
