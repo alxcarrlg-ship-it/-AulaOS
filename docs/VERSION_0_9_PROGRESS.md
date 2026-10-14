@@ -8,7 +8,7 @@ Desde el editor de documento con plantilla se puede pedir contenido indicando te
 
 La IA debe devolver un objeto JSON con cambios por ID y notas sobre información faltante. Se rechazan respuestas incompletas, claves repetidas, campos inexistentes, textos inválidos y contenido fuera de límites. La solicitud puede generar consumo incluso si la propuesta se rechaza por formato. No hay reintento automático. Reutiliza perfil, credencial, tokens máximos y límite mensual actuales.
 
-La propuesta se guarda aparte, con petición, revisión de origen, texto nuevo, notas y estado. El docente ve antes/después de todos los campos y puede aplicarla completa o descartarla. Aplicar crea una nueva revisión del documento y conserva anteriores; aplicar dos veces no duplica versiones. Si el documento cambió durante o después de la consulta, la propuesta no sobrescribe esos cambios. Las propuestas sobreviven al reinicio y se reabren desde el mismo botón.
+La propuesta se guarda aparte, con petición, revisión de origen, texto nuevo, notas y estado. El docente ve antes/después de todos los campos y puede elegir campos, corregir textos antes de aplicar o descartarla. Aplicar crea una nueva revisión del documento y conserva anteriores; aplicar dos veces no duplica versiones. Si el documento cambió durante o después de la consulta, la propuesta no sobrescribe esos cambios. Las propuestas sobreviven al reinicio y se reabren desde el mismo botón.
 
 No se impone un número de columnas. Los campos omitidos mantienen su contenido. No se agregan filas ni se reconstruye el formato. El renderizador y las restricciones de 0.7 siguen vigentes. Se puede exportar la versión aprobada e importarla como material para revisarla en el chat.
 
@@ -17,14 +17,14 @@ No se impone un número de columnas. Los campos omitidos mantienen su contenido.
 - Generación por campos implementada, calidad semántica y pedagógica todavía no evaluada con un modelo real.
 - Las instrucciones al modelo piden no inventar hechos ni requisitos; no son garantía de exactitud.
 - Hasta 18 KB de petición + campos y 6000 caracteres de petición. El límite de respuesta del perfil puede ser insuficiente para formatos grandes; se rechaza JSON incompleto sin modificar documentos.
-- Se aplica o descarta la propuesta completa. La selección/edición de cambios individuales aún no está implementada; después de aplicar se puede editar o recuperar una revisión anterior.
+- La revisión permite seleccionar y editar campos. Aplicar resuelve esa propuesta: los campos omitidos se conservan como estaban y no quedan pendientes dentro de ella.
 - No consulta internet en este flujo. Puede usar hasta tres materiales seleccionados del mismo grupo, dentro del límite total de 18 KB.
 - Las propuestas de plantilla no ejecutan acciones escolares ni comandos del sistema. La interpretación natural de tareas/observaciones está disponible mediante el flujo separado descrito abajo; no ejecuta acciones por el mero envío de una conversación normal.
 - No hay autoguardado ante cierre forzado de una petición todavía no enviada.
 
 ## Verificación de este bloque
 
-162 pruebas totales: 161 pasan en Linux y una de DPAPI queda omitida por requerir Windows. Trece nuevas cubren revisión sin escritura, aplicación idempotente, descarte persistente, aislamiento, cambios concurrentes, JSON inválido/duplicado/campos inexistentes, propuesta sin cambios, exclusión de expedientes/rutas, límites antes de llamar al proveedor, conservación de ediciones anteriores, rollback atómico, formatos variables y flujo propuesta → versión → Word → material → chat.
+166 pruebas totales: 165 pasan en Linux y una de DPAPI queda omitida por requerir Windows. Trece nuevas cubren revisión sin escritura, aplicación idempotente, descarte persistente, aislamiento, cambios concurrentes, JSON inválido/duplicado/campos inexistentes, propuesta sin cambios, exclusión de expedientes/rutas, límites antes de llamar al proveedor, conservación de ediciones anteriores, rollback atómico, formatos variables y flujo propuesta → versión → Word → material → chat.
 
 Proveedores simulados. No se hizo una llamada real a OpenAI. Se verificó compilación y diferencias. No se cambió el motor de renderizado; la comprobación visual de formatos permanece en 0.7. No se probó la nueva interfaz en Windows.
 
@@ -47,9 +47,24 @@ No hay clave API configurada en este entorno: interpretación, redacción y uso 
 ## Próximo punto de reanudación
 
 1. Evaluar y pulir las peticiones naturales ya implementadas, especialmente aclaraciones, fechas y nombres ambiguos.
-2. Evaluar la adaptación de fuentes a los campos y mejorar la revisión de cambios individuales y referencias de salida.
+2. Evaluar la adaptación de fuentes a los campos y las referencias de salida.
 3. Evaluar con API real generación, mapeo de campos, errores de formato, duración y consumo; probar transcripción real cuando haya credencial/hardware disponible.
 4. Revisar visualmente documentos resultantes de propuestas reales y formatos representativos. Corregir cortes y problemas de distribución.
 5. Completar la revisión integral de flujos y requisitos pendientes antes de cerrar 0.9. Windows, dispositivos, PC básica e instalador siguen en 1.0.
 
 La numeración no garantiza que todos los requisitos quepan en un solo incremento; si hace falta, se documentarán incrementos adicionales en lugar de declarar listo algo sin validar.
+
+
+## Tercer bloque: aprobación por campo
+
+«Elegir, editar y aplicar cambios» abre una revisión local de los campos propuestos. Cada campo muestra el texto anterior y el texto editable que se guardará. Se puede excluir cualquier campo, y se indica cuántos se incluirán. Aplicar crea una sola revisión, conservando la propuesta original y guardando aparte los textos realmente aprobados. El historial muestra ambos. No se consume API al revisar o corregir.
+
+Las selecciones vacías, campos ajenos, caracteres no admitidos, textos excesivos y citas a materiales no enviados se rechazan sin escribir una revisión. Los errores conservan la ventana y sus correcciones. Una segunda aplicación idéntica devuelve la revisión existente; una repetición con distinta selección/edición se rechaza. Se mantienen aislamiento por grupo, bloqueo de versiones obsoletas y transacción atómica. Las propuestas antiguas aplicadas sin el nuevo registro de selección se interpretan como aceptación completa.
+
+Las correcciones de la ventana de revisión solo se guardan al aplicar. Volver con cambios pide confirmar su descarte; la propuesta original permanece guardada. Un cierre forzado puede perder la revisión manual en curso. La interfaz nueva aún no se ha ejecutado en Windows.
+
+Cuatro pruebas adicionales verifican aceptación parcial con edición y auditoría, entradas inválidas sin escrituras, compatibilidad de propuestas antiguas y exportación que conserva campos no elegidos. Resultado total: 166 pruebas, 165 aprobadas y una omitida por Windows.
+
+## Siguiente incremento propuesto: 0.10
+
+Después de cerrar los pendientes de 0.9, 0.10 puede centrarse en continuidad del trabajo: guardar revisiones manuales incompletas para retomarlas, señalar información faltante antes de generar y mejorar el recorrido desde materiales hasta documento final. Es un alcance propuesto, no funciones ya disponibles. La validación de API/calidad pendiente no se considera resuelta por cambiar la numeración. Windows, dispositivos, PC básica e instalador siguen previstos para 1.0.

@@ -41,6 +41,7 @@ class TemplateSuggestions:
           created_at TEXT NOT NULL,resolved_at TEXT);''')
         columns={r[1] for r in store.con.execute('PRAGMA table_info(template_suggestions)')}
         if 'sources_json' not in columns:store.con.execute("ALTER TABLE template_suggestions ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]'")
+        if 'applied_changes' not in columns:store.con.execute("ALTER TABLE template_suggestions ADD COLUMN applied_changes TEXT")
         store.con.commit()
     def context(self,gid,did,goal,expected_revision,material_ids=None):
         goal=goal.strip()
@@ -84,23 +85,39 @@ class TemplateSuggestions:
         old={f['id']:f['text'] for f in schema['fields']};old.update(json.loads(doc['changes']))
         locations={f['id']:f['location'] for f in schema['fields']}
         return [{'id':key,'location':locations[key],'before':old[key],'after':value} for key,value in json.loads(proposal['changes']).items()]
-    def resolve(self,gid,sid,apply=False):
+    def accepted_changes(self,proposal,selected_keys=None,overrides=None):
+        proposed=json.loads(proposal['changes'])
+        keys=list(proposed) if selected_keys is None else selected_keys
+        if not isinstance(keys,(list,tuple)) or any(not isinstance(k,str) for k in keys):raise ValueError('Selección de campos inválida.')
+        if not keys or len(set(keys))!=len(keys) or not set(keys)<=set(proposed):raise ValueError('Selecciona campos únicos de esta propuesta.')
+        overrides={} if overrides is None else overrides
+        if not isinstance(overrides,dict) or not set(overrides)<=set(keys):raise ValueError('Solo puedes editar campos seleccionados.')
+        accepted={k:overrides.get(k,proposed[k]) for k in keys}
+        if any(not isinstance(v,str) for v in accepted.values()):raise ValueError('Los cambios deben ser texto.')
+        allowed={s['source'] for s in json.loads(proposal['sources_json'])}
+        if not set(re.findall(r'\[(M\d+)\]','\n'.join(accepted.values())))<=allowed:raise ValueError('Los cambios citan materiales que no fueron seleccionados.')
+        return accepted
+    def resolve(self,gid,sid,apply=False,selected_keys=None,overrides=None):
         con=self.store.con;con.execute('BEGIN IMMEDIATE')
         try:
             proposal=self.get(gid,sid)
             if proposal['state']!='pending':
-                if apply and proposal['state']=='applied':con.commit();return proposal['result_revision']
+                if apply and proposal['state']=='applied':
+                    if selected_keys is not None or overrides is not None:
+                        accepted=self.accepted_changes(proposal,selected_keys,overrides)
+                        if accepted!=json.loads(proposal['applied_changes'] or proposal['changes']):raise ValueError('Esta propuesta ya se aplicó con otra selección o edición.')
+                    con.commit();return proposal['result_revision']
                 raise ValueError('La propuesta ya fue resuelta.')
-            revision=None
+            revision=None;accepted=None
             if apply:
                 doc=self.templates.document(gid,proposal['document_id'])
                 if doc['current_revision']!=proposal['base_revision']:raise RevisionConflict('El documento cambió desde la propuesta. Descártala y genera otra sobre la versión actual.')
-                template=self.templates.get(gid,doc['template_id']);changes=json.loads(doc['changes']);changes.update(json.loads(proposal['changes']))
+                accepted=self.accepted_changes(proposal,selected_keys,overrides)
+                template=self.templates.get(gid,doc['template_id']);changes=json.loads(doc['changes']);changes.update(accepted)
                 validate_changes(json.loads(template['schema_json']),changes)
-                if not json.loads(proposal['changes']):raise ValueError('No hay cambios para aplicar. Revisa las notas de la IA.')
                 revision=doc['current_revision']+1
                 con.execute('INSERT INTO template_document_revisions VALUES(?,?,?,?)',(doc['id'],revision,json.dumps(changes,ensure_ascii=False),now()))
                 con.execute('UPDATE template_documents SET current_revision=? WHERE id=?',(revision,doc['id']))
-            con.execute('UPDATE template_suggestions SET state=?,result_revision=?,resolved_at=? WHERE id=?',('applied' if apply else 'rejected',revision,now(),sid))
+            con.execute('UPDATE template_suggestions SET state=?,result_revision=?,resolved_at=?,applied_changes=? WHERE id=?',('applied' if apply else 'rejected',revision,now(),json.dumps(accepted,ensure_ascii=False) if accepted is not None else None,sid))
             con.commit();return revision
         except Exception:con.rollback();raise

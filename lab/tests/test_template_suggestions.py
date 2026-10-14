@@ -101,3 +101,43 @@ class SuggestionsTest(unittest.TestCase):
                 return 'Documento disponible para revisión.'
         answer=chat.send(self.gid,'Revisa este documento',FakeChat(),include_records=False,material_ids=[mid])
         self.assertIn('revisión',answer)
+
+
+    def test_selective_edited_acceptance_and_audit(self):
+        other=next(f['id'] for f in self.schema['fields'] if f['id']!=self.key)
+        payload={self.key:'Idea IA',other:'No aceptar'}
+        class Fake:
+            def respond(self,messages):return json.dumps({'changes':payload,'notes':''})
+        sid=self.service.propose(self.gid,self.did,'Objetivo',1,Fake())
+        self.assertEqual(self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Mi adaptación'}),2)
+        doc=json.loads(self.templates.document(self.gid,self.did)['changes'])
+        self.assertEqual(doc,{self.key:'Mi adaptación'})
+        row=self.service.get(self.gid,sid)
+        self.assertEqual(json.loads(row['changes']),payload)
+        self.assertEqual(json.loads(row['applied_changes']),doc)
+        self.assertEqual(self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Mi adaptación'}),2)
+        with self.assertRaises(ValueError):self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Otra edición'})
+        self.assertEqual(self.templates.document(self.gid,self.did)['revision'],2)
+
+    def test_invalid_review_does_not_resolve_or_write(self):
+        sid=self.propose()
+        for keys,edits in [([],{}),(['unknown'],{}),([self.key,self.key],{}),([self.key],{'unknown':'x'}),([self.key],{self.key:None}),([self.key],{self.key:'x\x00'}),([self.key],{self.key:'x'*120001}),([self.key],{self.key:'Cita [M9999]'})]:
+            with self.subTest(keys=keys,kind=str(edits)[:50]):
+                with self.assertRaises(ValueError):self.service.resolve(self.gid,sid,True,keys,edits)
+                self.assertEqual(self.templates.document(self.gid,self.did)['revision'],1)
+                self.assertEqual(self.service.get(self.gid,sid)['state'],'pending')
+                self.assertIsNone(self.service.get(self.gid,sid)['applied_changes'])
+
+    def test_legacy_applied_audit_and_migration(self):
+        sid=self.propose();self.service.resolve(self.gid,sid,True)
+        self.store.con.execute('UPDATE template_suggestions SET applied_changes=NULL WHERE id=?',(sid,));self.store.con.commit()
+        TemplateSuggestions(self.store);TemplateSuggestions(self.store)
+        self.assertEqual(self.service.resolve(self.gid,sid,True,[self.key]),2)
+
+    def test_selective_export_retains_original_other_fields(self):
+        sid=self.propose();self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Texto revisado'})
+        path=self.root/'reviewed.docx';self.templates.export(self.gid,self.did,path)
+        from templates import inspect_template
+        fields=inspect_template(path.read_bytes())['fields']
+        original={f['id']:f['text'] for f in self.schema['fields']}
+        for field in fields:self.assertEqual(field['text'],'Texto revisado' if field['id']==self.key else original[field['id']])

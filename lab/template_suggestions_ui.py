@@ -21,7 +21,7 @@ class SuggestionWindow(tk.Toplevel):
         self.box=tk.Listbox(self,height=5,exportselection=False);self.box.pack(fill='x',padx=12)
         self.preview=tk.Text(self,wrap='word',state='disabled');self.preview.pack(fill='both',expand=True,padx=12,pady=8)
         controls=ttk.Frame(self);controls.pack(fill='x',padx=12)
-        self.apply=ttk.Button(controls,text='Aplicar todos los cambios como nueva versión',command=lambda:self.resolve(True));self.apply.pack(side='left')
+        self.apply=ttk.Button(controls,text='Elegir, editar y aplicar cambios',command=lambda:self.resolve(True));self.apply.pack(side='left')
         self.reject=ttk.Button(controls,text='Descartar propuesta',command=lambda:self.resolve(False));self.reject.pack(side='left',padx=6)
         self.notice=tk.StringVar(value='No se modifica el documento al pedir una propuesta. Revisar exactitud pedagógica y distribución antes de entregar.')
         ttk.Label(self,textvariable=self.notice,wraplength=920).pack(padx=12,pady=8)
@@ -43,6 +43,10 @@ class SuggestionWindow(tk.Toplevel):
             differences=self.service.review(self.gid,row['id'])
             if not differences:text+='La IA no propuso cambios de texto. Revisa sus notas.'
             for change in differences:text+=change['location']+' · '+change['id']+'\nANTES:\n'+change['before']+'\nPROPUESTA:\n'+change['after']+'\n\n'
+            if row['state']=='applied':
+                accepted=json.loads(row['applied_changes'] or row['changes'])
+                text+='CAMBIOS APROBADOS (los demás se omitieron)\n'
+                for key,value in accepted.items():text+=key+'\n'+value+'\n\n'
             for source in sources:text+='COPIA DE FUENTE ['+source['source']+'] '+source['title']+'\n'+source['text']+'\n\n'
         self.preview.configure(state='normal');self.preview.delete('1.0','end');self.preview.insert('1.0',text);self.preview.configure(state='disabled')
     def request(self):
@@ -77,8 +81,14 @@ class SuggestionWindow(tk.Toplevel):
         if apply and self.editor.winfo_exists():
             self.editor.capture()
             if self.editor.changes!=self.editor.saved:messagebox.showinfo('Cambios locales','Guarda tus cambios en el editor antes de continuar. Si cambió la versión, tendrás que pedir una propuesta nueva.',parent=self);return
-        try:revision=self.service.resolve(self.gid,row['id'],apply)
-        except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
+        if apply:
+            dialog=ReviewChanges(self,self.service.review(self.gid,row['id']),lambda keys,edits:self.service.resolve(self.gid,row['id'],True,keys,edits))
+            self.wait_window(dialog)
+            if dialog.result is None:return
+            revision=dialog.result
+        else:
+            try:revision=self.service.resolve(self.gid,row['id'],False)
+            except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
         if apply and self.editor.winfo_exists():
             doc=self.editor.service.document(self.gid,self.did);self.editor.revision=doc['revision'];self.editor.changes=json.loads(doc['changes']);self.editor.saved=dict(self.editor.changes);self.editor.active=None;self.editor.select();self.editor.notice.set(f'Propuesta aplicada como versión {revision}. Revisa el Word exportado.')
         self.refresh();self.notice.set(f'Guardada nueva versión {revision}.' if apply else 'Propuesta descartada. Documento intacto.')
@@ -91,3 +101,52 @@ class SuggestionWindow(tk.Toplevel):
     def try_close(self):
         if self.busy:messagebox.showinfo('Solicitud en curso','Espera a que termine; no habrá reintentos automáticos.',parent=self);return False
         self.after_cancel(self.poll_id);self.app.draft_editors.discard(self);self.destroy();return True
+
+
+class ReviewChanges(tk.Toplevel):
+    """Local review only; the parent commits the chosen text atomically."""
+    def __init__(self,parent,changes,on_apply):
+        super().__init__(parent);self.result=None;self.changes=changes;self.active=None;self.on_apply=on_apply
+        self.values={c['id']:c['after'] for c in changes};self.included=set(self.values)
+        self.title('Revisar campos antes de guardar');self.geometry('900x700');self.transient(parent)
+        ttk.Label(self,text='Selecciona cada campo para revisarlo. Desmarca los que quieras omitir y corrige el texto.\nAl aplicar se cierra esta propuesta; los campos omitidos conservan su contenido.',wraplength=860).pack(anchor='w',padx=12,pady=8)
+        self.box=tk.Listbox(self,height=6,exportselection=False);self.box.pack(fill='x',padx=12)
+        for c in changes:self.box.insert('end',c['location']+' · '+c['id'])
+        self.include=tk.BooleanVar(value=True)
+        ttk.Checkbutton(self,text='Incluir este campo',variable=self.include,command=self.capture).pack(anchor='w',padx=12)
+        ttk.Label(self,text='Antes').pack(anchor='w',padx=12)
+        self.before=tk.Text(self,height=5,wrap='word',state='disabled');self.before.pack(fill='x',padx=12)
+        ttk.Label(self,text='Texto que se guardará (editable)').pack(anchor='w',padx=12)
+        self.after_text=tk.Text(self,wrap='word');self.after_text.pack(fill='both',expand=True,padx=12,pady=6)
+        self.count=tk.StringVar();ttk.Label(self,textvariable=self.count).pack(anchor='w',padx=12)
+        controls=ttk.Frame(self);controls.pack(fill='x',padx=12,pady=8)
+        ttk.Button(controls,text='Aplicar selección como nueva versión',command=self.accept).pack(side='left')
+        ttk.Button(controls,text='Volver sin aplicar',command=self.cancel).pack(side='left',padx=8)
+        self.box.bind('<<ListboxSelect>>',self.select);self.protocol('WM_DELETE_WINDOW',self.cancel)
+        if changes:self.box.selection_set(0);self.select()
+        self.grab_set()
+    def capture(self):
+        if self.active is not None:
+            self.values[self.active]=self.after_text.get('1.0','end-1c')
+            if self.include.get():self.included.add(self.active)
+            else:self.included.discard(self.active)
+        self.count.set(f'{len(self.included)} de {len(self.changes)} campos incluidos.')
+    def select(self,event=None):
+        self.capture()
+        if not self.box.curselection():return
+        change=self.changes[self.box.curselection()[0]];self.active=change['id']
+        self.include.set(self.active in self.included)
+        self.before.configure(state='normal');self.before.delete('1.0','end');self.before.insert('1.0',change['before']);self.before.configure(state='disabled')
+        self.after_text.delete('1.0','end');self.after_text.insert('1.0',self.values[self.active])
+    def accept(self):
+        self.capture()
+        if not self.included:messagebox.showinfo('Sin campos','Incluye al menos un campo o vuelve para descartar la propuesta.',parent=self);return
+        keys=[c['id'] for c in self.changes if c['id'] in self.included]
+        try:self.result=self.on_apply(keys,{k:self.values[k] for k in keys})
+        except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
+        self.destroy()
+    def cancel(self):
+        self.capture()
+        if self.included!=set(self.values) or any(self.values[c['id']]!=c['after'] for c in self.changes):
+            if not messagebox.askyesno('Volver sin aplicar','Se perderán tus ediciones y selección de esta revisión. La propuesta original seguirá guardada. ¿Volver?',parent=self):return
+        self.destroy()
