@@ -7,6 +7,7 @@ from tkinter import ttk,messagebox
 from core import Store
 from online import OpenAIProvider,MeteredProvider
 from template_suggestions import TemplateSuggestions
+from teaching_profiles_ui import ProfileEditor
 
 class SuggestionWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -15,6 +16,12 @@ class SuggestionWindow(tk.Toplevel):
         self.title('Contenido para tu formato · propuesta revisable');self.geometry('980x780')
         ttk.Label(self,text='Describe tema, nivel, sesiones y requisitos. La IA propondrá cambios solo en campos existentes.',wraplength=920).pack(anchor='w',padx=12,pady=8)
         self.goal=tk.Text(self,height=4,wrap='word');self.goal.pack(fill='x',padx=12)
+        profile_bar=ttk.Frame(self);profile_bar.pack(fill='x',padx=12,pady=4)
+        ttk.Label(profile_bar,text='Perfil de esta escuela:').pack(side='left')
+        self.profile_box=ttk.Combobox(profile_bar,state='readonly',width=38);self.profile_box.pack(side='left',padx=6)
+        ttk.Button(profile_bar,text='Nuevo',command=lambda:self.edit_profile(True)).pack(side='left')
+        ttk.Button(profile_bar,text='Ver / editar',command=self.edit_profile).pack(side='left',padx=6)
+        self.refresh_profiles()
         self.use_sources=tk.BooleanVar(value=False)
         ttk.Checkbutton(self,text='Usar los materiales seleccionados para el chat de este grupo (hasta tres)',variable=self.use_sources).pack(anchor='w',padx=12,pady=4)
         ttk.Button(self,text='Pedir propuesta con OpenAI',command=self.request).pack(anchor='w',padx=12,pady=6)
@@ -26,6 +33,20 @@ class SuggestionWindow(tk.Toplevel):
         self.notice=tk.StringVar(value='No se modifica el documento al pedir una propuesta. Revisar exactitud pedagógica y distribución antes de entregar.')
         ttk.Label(self,textvariable=self.notice,wraplength=920).pack(padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.show);self.refresh();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close);self.poll_id=self.after(100,self.poll)
+    def refresh_profiles(self,pid=None):
+        self.profile_rows=self.service.profiles.list(self.gid)
+        self.profile_box.configure(values=['Sin perfil']+[r['name']+' · '+r['teacher'] for r in self.profile_rows])
+        self.profile_box.current(next((i+1 for i,r in enumerate(self.profile_rows) if r['id']==pid),0))
+    def selected_profile(self):
+        index=self.profile_box.current()
+        return self.profile_rows[index-1] if index>0 else None
+    def edit_profile(self,new=False):
+        if self.busy:return
+        row=None if new else self.selected_profile()
+        if not new and row is None:messagebox.showinfo('Perfil','Selecciona un perfil o crea uno nuevo.',parent=self);return
+        dialog=ProfileEditor(self,self.service.profiles,self.gid,row['id'] if row else None)
+        self.wait_window(dialog)
+        self.refresh_profiles(dialog.result or (row['id'] if row else None))
     def selected(self):return self.rows[self.box.curselection()[0]] if self.box.curselection() else None
     def refresh(self):
         self.rows=self.service.list(self.gid,self.did);self.box.delete(0,'end')
@@ -38,6 +59,8 @@ class SuggestionWindow(tk.Toplevel):
         self.apply.configure(state='normal' if pending else 'disabled');self.reject.configure(state='normal' if pending else 'disabled')
         if row:
             text='PETICIÓN\n'+row['goal']+'\n\nNOTAS DE LA IA (revisar)\n'+row['notes']+'\n\n'
+            profile=json.loads(row['profile_json'])
+            if profile:text+='PERFIL UTILIZADO · '+profile['name']+' · '+profile['teacher']+' · v'+str(profile['revision'])+'\n'+profile['requirements']+'\n\n'
             sources=json.loads(row['sources_json'])
             text+='FUENTES ENVIADAS\n'+('\n'.join('['+s['source']+'] '+s['title'] for s in sources) or 'Ninguna')+'\n\n'
             differences=self.service.review(self.gid,row['id'])
@@ -55,21 +78,23 @@ class SuggestionWindow(tk.Toplevel):
         if not self.editor.save():return
         goal=self.goal.get('1.0','end-1c').strip();revision=self.editor.revision
         material_ids=list(self.app.attachments.get(self.gid,[])) if self.use_sources.get() else []
+        profile=self.selected_profile();profile_id=profile['id'] if profile else None;profile_revision=profile['revision'] if profile else None
         try:
-            _,_,messages=self.service.context(self.gid,self.did,goal,revision,material_ids)
+            _,_,messages=self.service.context(self.gid,self.did,goal,revision,material_ids,profile_id,profile_revision)
             sources=json.loads(messages[-1]['content'])['sources']
         except Exception as exc:messagebox.showerror('Propuesta',str(exc),parent=self);return
         if not self.app.api_key:self.app.configure_online()
         if not self.app.api_key:return
         source_names=', '.join('['+s['source']+'] '+s['title'] for s in sources) or 'ninguna'
-        if not messagebox.askyesno('Enviar campos a OpenAI','Se enviarán tu petición y los textos actuales de los párrafos editables. Fuentes: '+source_names+'. Pueden contener datos personales. No se envían el Word, imágenes, otros registros ni historial. La consulta consume API. ¿Continuar?',parent=self):return
+        profile_notice=('\nPerfil: '+profile['name']+' · '+profile['teacher']+'\n'+profile['requirements']) if profile else '\nSin perfil docente.'
+        if not messagebox.askyesno('Enviar campos a OpenAI','Se enviarán tu petición y los textos actuales de los párrafos editables. Fuentes: '+source_names+'. Pueden contener datos personales. No se envían el Word, imágenes, otros registros ni historial. La consulta consume API.'+profile_notice+'\n¿Continuar?',parent=self):return
         settings=dict(self.app.settings);key=self.app.api_key;db=self.app.store.db_path;gid=self.gid;did=self.did
         self.busy=True;self.show();self.notice.set('Preparando propuesta… El documento no se modificará hasta que la aceptes.')
         def work():
             store=None
             try:
                 store=Store(db);provider=MeteredProvider(store,OpenAIProvider(key,settings['profile'],settings['max_output_tokens']),settings['monthly_limit'])
-                sid=TemplateSuggestions(store).propose(gid,did,goal,revision,provider,material_ids);self.results.put((sid,None))
+                sid=TemplateSuggestions(store).propose(gid,did,goal,revision,provider,material_ids,profile_id,profile_revision);self.results.put((sid,None))
             except Exception as exc:self.results.put((None,str(exc)))
             finally:
                 if store:store.close()

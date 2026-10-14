@@ -180,3 +180,49 @@ class SuggestionsTest(unittest.TestCase):
         with self.assertRaises(RevisionConflict):self.service.resolve(self.gid,sid,True,[self.key],{self.key:'Revisión pendiente'},1)
         self.assertEqual(self.service.review_draft(self.gid,sid)['values'][self.key],'Revisión pendiente')
         self.assertEqual(json.loads(self.templates.document(self.gid,self.did)['changes'])[self.key],'Nueva versión')
+
+    def test_profile_school_scope_and_teacher_variants(self):
+        profiles=self.service.profiles
+        one=profiles.save(self.gid,'Planeación','Docente A','Actividades TR/Ss')
+        two=profiles.save(self.gid,'Planeación','Docente B','Preguntas abiertas')
+        sibling=self.store.group('Escuela A','Otro grupo')
+        self.assertEqual({r['id'] for r in profiles.list(sibling)},{one,two})
+        self.assertEqual(profiles.list(self.other),[])
+        with self.assertRaises(ValueError):profiles.get(self.other,one)
+        with self.assertRaises(ValueError):profiles.save(self.other,'X','Y','Z',one,1)
+
+    def test_profile_opt_in_and_snapshot(self):
+        profiles=self.service.profiles;pid=profiles.save(self.gid,'Mi formato','Docente','Requisito privado')
+        _,_,messages=self.service.context(self.gid,self.did,'Clase',1)
+        self.assertNotIn('Requisito privado',json.dumps(messages))
+        sid=self.service.propose(self.gid,self.did,'Clase',1,self.provider(),profile_id=pid,profile_revision=1)
+        profiles.save(self.gid,'Mi formato','Docente','Nuevo requisito',pid,1)
+        saved=json.loads(self.service.get(self.gid,sid)['profile_json'])
+        self.assertEqual(saved['requirements'],'Requisito privado');self.assertEqual(saved['revision'],1)
+        self.assertEqual(self.templates.document(self.gid,self.did)['revision'],1)
+
+    def test_profile_conflicts_stop_before_provider(self):
+        profiles=self.service.profiles;pid=profiles.save(self.gid,'Formato','Docente','Uno')
+        profiles.save(self.gid,'Formato','Docente','Dos',pid,1)
+        with self.assertRaises(RevisionConflict):profiles.save(self.gid,'Formato','Docente','Tres',pid,1)
+        class Forbidden:
+            def respond(self,messages):raise AssertionError('No debe enviarse')
+        with self.assertRaises(RevisionConflict):self.service.propose(self.gid,self.did,'Clase',1,Forbidden(),profile_id=pid,profile_revision=1)
+        self.assertEqual(profiles.get(self.gid,pid)['requirements'],'Dos')
+
+    def test_profile_validation_and_context_budget(self):
+        profiles=self.service.profiles
+        for name,teacher,requirements in [('', 'Docente','X'),('X','','Y'),('X','Y',''),('X','Y','a'*6001)]:
+            with self.assertRaises(ValueError):profiles.save(self.gid,name,teacher,requirements)
+        pid=profiles.save(self.gid,'Formato','Docente','a'*6000)
+        with patch('template_suggestions.MAX_CONTEXT',1000):
+            with self.assertRaises(ValueError):self.service.context(self.gid,self.did,'Clase',1,profile_id=pid)
+
+    def test_profile_reopen_and_no_fixed_structure(self):
+        pid=self.service.profiles.save(self.gid,'Libre','Docente','Usar el formato de la escuela; no exigir seis columnas.')
+        other=Store(self.root/'db.sqlite3')
+        try:self.assertEqual(TemplateSuggestions(other).profiles.get(self.gid,pid)['name'],'Libre')
+        finally:other.close()
+        _,schema,messages=self.service.context(self.gid,self.did,'Clase',1,profile_id=pid)
+        self.assertEqual(schema['tables'][0]['columns'],3)
+        self.assertEqual(json.loads(messages[-1]['content'])['teaching_profile']['id'],pid)
