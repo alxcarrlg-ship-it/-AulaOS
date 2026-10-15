@@ -211,6 +211,7 @@ class MeteredProvider:
         self.source="research" if self.research else "online"
         self.provider=provider; self.ledger=UsageLedger(store); self.limit=monthly_limit
     def respond(self, messages):
+        self.last_reply=None
         rid=self.ledger.reserve(self.provider.profile, self.limit,research=self.research)
         try:
             reply=self.provider.respond(messages)
@@ -218,4 +219,5 @@ class MeteredProvider:
             self.ledger.finish(rid,error=exc.kind if isinstance(exc,OnlineError) else 'unknown')
             raise
         self.ledger.finish(rid,reply=reply)
+        self.last_reply=reply
         return reply.text
