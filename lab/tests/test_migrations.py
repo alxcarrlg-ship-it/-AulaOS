@@ -47,12 +47,12 @@ class MigrationTests(unittest.TestCase):
         self.legacy();first=Store(self.path);first.close();before=list((self.root/'migration_backups').glob('*.sqlite3'))
         second=Store(self.path)
         try:
-            self.assertIsNone(second.migration_backup);self.assertEqual(second.con.execute('SELECT count(*) FROM schema_migrations').fetchone()[0],1)
+            self.assertIsNone(second.migration_backup);self.assertEqual(second.con.execute('SELECT count(*) FROM schema_migrations').fetchone()[0],CURRENT_VERSION)
             self.assertEqual(list((self.root/'migration_backups').glob('*.sqlite3')),before)
         finally:second.close()
     def test_new_database_needs_no_preupgrade_backup(self):
         db=Store(self.path)
-        try:self.assertIsNone(db.migration_backup);self.assertEqual(db.con.execute('PRAGMA user_version').fetchone()[0],1)
+        try:self.assertIsNone(db.migration_backup);self.assertEqual(db.con.execute('PRAGMA user_version').fetchone()[0],CURRENT_VERSION)
         finally:db.close()
     def test_future_database_rejected_before_schema_changes(self):
         con=sqlite3.connect(self.path);con.execute('CREATE TABLE future_data(value TEXT)');con.execute("INSERT INTO future_data VALUES('Conservar')");con.execute('PRAGMA user_version=99');con.commit();con.close()

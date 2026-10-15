@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 import uuid
 
-CURRENT_VERSION=1
+CURRENT_VERSION=2
 
 def prepare(con,db_path):
     version=con.execute('PRAGMA user_version').fetchone()[0]
@@ -33,5 +33,9 @@ def upgrade(con):
             con.execute('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL)')
             con.execute('INSERT INTO schema_migrations VALUES(1,?,?)',('Matrícula por grupo; base de migraciones explícitas',dt.datetime.now().astimezone().isoformat()))
             con.execute('PRAGMA user_version=1')
+        if version<2:
+            con.execute('CREATE TABLE IF NOT EXISTS workflow_plans(id INTEGER PRIMARY KEY,group_id INTEGER NOT NULL REFERENCES groups(id),goal TEXT NOT NULL,steps_json TEXT NOT NULL,created_at TEXT NOT NULL)')
+            con.execute('INSERT INTO schema_migrations VALUES(2,?,?)',('Rutas conversacionales revisables',dt.datetime.now().astimezone().isoformat()))
+            con.execute('PRAGMA user_version=2')
         con.commit()
     except Exception:con.rollback();raise

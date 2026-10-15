@@ -1,0 +1,11 @@
+# AulaOS 0.20 — rutas conversacionales revisables
+
+Desde el chat, «Organizar trabajo» o `/trabajar petición` abre un organizador. Sin IA admite `proyecto #ID`, `evidencias #ID`, `planeación #ID` y `materiales #ID`. Con interpretación online prepara hasta cuatro pasos a partir de una petición libre. Solo se envía esa petición, con confirmación; no se envían el catálogo local, documentos, alumnos, adjuntos ni historial.
+
+Los destinos se resuelven localmente dentro del grupo, por título exacto o #ID mencionado literalmente. Títulos ambiguos, destinos inventados, herramientas no admitidas y respuestas incompletas se rechazan. Una aclaración no crea una ruta. Las rutas quedan guardadas y pueden retomarse; cada paso se abre por decisión del docente. Si cambió la versión del proyecto o planeación, se requiere preparar otra ruta.
+
+Herramientas conectadas: proyecto/avance, evidencias, edición y propuestas de planeación, paquetes de clase, recursos web y preparación de tarea/observación/borrador. Las peticiones para planeaciones, paquetes y acciones se copian a sus ventanas; Recursos web abre su interfaz y requiere introducir la búsqueda allí. No se ejecuta código del modelo ni se marcan pasos como realizados por abrir una ventana. Cada herramienta mantiene su revisión, confirmación y guardado anteriores.
+
+Es una entrada conversacional al trabajo existente, no un agente autónomo de varias operaciones. No enlaza automáticamente resultados entre pasos, no resuelve referencias como «esa» sin un destino explícito, y no reemplaza todas las ventanas. El chat normal sigue conversando: la interpretación de trabajo se solicita explícitamente. El catálogo refleja los títulos disponibles al abrir el organizador; reabrirlo actualiza esa lista. El texto libre no preparado aún no tiene autoguardado.
+
+Esquema del núcleo v2: tabla workflow_plans y migración numerada con respaldo previo. Pruebas: 274 ejecutadas, 273 correctas y una de Windows omitida. Siete nuevas cubren ruta local, múltiples pasos, privacidad del contexto, aislamiento, versión obsoleta, ambigüedad, rechazo de herramientas y recorrido ruta → edición revisada → exportación DOCX. La interpretación se prueba con proveedor simulado, sin evaluación semántica real ni prueba de interfaz Windows.

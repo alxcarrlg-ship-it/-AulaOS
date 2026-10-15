@@ -1,4 +1,4 @@
-"""AulaOS internal 0.19-dev: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.20-dev: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -18,6 +18,8 @@ from projects_ui import open_projects
 from resource_workflow_ui import open_resources
 from natural_actions_ui import NaturalActionWindow
 from drafts import Drafts
+from workflows import is_workflow
+from workflows_ui import open_workflow
 from drafts_ui import DraftEditor, open_drafts
 from online import OpenAIProvider, MeteredProvider, UsageLedger, OnlineError, PROFILES
 from settings import Settings, CredentialVault
@@ -33,7 +35,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.19-dev')
+        self.title('AulaOS · Desarrollo interno 0.20-dev')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -69,7 +71,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.19-dev · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.20-dev · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -151,6 +153,7 @@ class AulaOS(tk.Tk):
         self.research_domains=tk.StringVar();ttk.Entry(web_row,textvariable=self.research_domains,width=32).pack(side='left')
         self.usage_text=tk.StringVar();ttk.Label(self.tab_chat,textvariable=self.usage_text,foreground='#506980').pack(anchor='w')
         local_bar=ttk.Frame(self.tab_chat);local_bar.pack(fill='x',pady=4)
+        ttk.Button(local_bar,text='Organizar trabajo',command=lambda:open_workflow(self,self.gid,self.chat_msg.get())).pack(side='left',padx=5)
         ttk.Button(local_bar,text='Recursos web',command=lambda:open_resources(self,self.gid)).pack(side='left',padx=5)
         ttk.Button(local_bar,text='Carpetas / buscar archivos',command=lambda:FolderWindow(self,self.gid)).pack(side='left')
         ttk.Button(local_bar,text='Voz / dictado',command=self.record_audio).pack(side='left',padx=5)
@@ -506,6 +509,8 @@ class AulaOS(tk.Tk):
     def ask(self,retry_id=None,retry_text=None):
         question=retry_text if retry_text is not None else self.chat_msg.get().strip()
         if not question or self.chat_busy:return
+        if retry_id is None and is_workflow(question):
+            open_workflow(self,self.gid,question[len('/trabajar'):].strip());return
         material_ids=list(self.attachments.get(self.gid,[]))
         gid=self.gid;settings=dict(self.settings);mode=self.chat_mode.get();api_key=self.api_key
         research=self.research_mode.get();allowed=[]
