@@ -252,3 +252,25 @@ class SuggestionsTest(unittest.TestCase):
         self.assertEqual(missing_details(profile,'SESIONES: 3\nProducto: pendiente'),['Producto'])
         self.assertEqual(missing_details(profile,'Sesiones: 3\nProducto: No aplica porque será práctica oral'),[])
         self.assertEqual(missing_details(None,'Clase'),[])
+
+    def test_conflicting_required_values_block_generation(self):
+        pid=self.service.profiles.save(self.gid,'Formato','Docente','Requisitos',questions=['Sesiones'])
+        class Forbidden:
+            def respond(self,messages):raise AssertionError('No enviar')
+        with self.assertRaises(ValueError):self.service.propose(self.gid,self.did,'Sesiones: 3\nSesiones: 4',1,Forbidden(),profile_id=pid)
+
+
+    def test_semantic_review_to_template_proposal_flow(self):
+        from clarifications import Clarifications
+        pid=self.service.profiles.save(self.gid,'Formato','Docente','Requisitos',questions=['Sesiones'])
+        goal='Necesito tres sesiones de inglés.'
+        class ReviewProvider:
+            def respond(self,messages):return json.dumps({'answers':[{'label':'Sesiones','value':'3','evidence':'tres sesiones'}],'issues':[]})
+        reviewer=Clarifications(self.store)
+        rid=reviewer.analyze(self.gid,goal,ReviewProvider(),pid,1)
+        revised=reviewer.suggested_request(self.gid,rid,goal,pid,1)
+        sid=self.service.propose(self.gid,self.did,revised,1,self.provider(),profile_id=pid,profile_revision=1)
+        self.assertEqual(self.templates.document(self.gid,self.did)['revision'],1)
+        self.assertIn('Sesiones: 3',self.service.get(self.gid,sid)['goal'])
+        self.service.resolve(self.gid,sid,True)
+        self.assertEqual(self.templates.document(self.gid,self.did)['revision'],2)

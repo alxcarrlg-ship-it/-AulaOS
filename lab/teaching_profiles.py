@@ -63,3 +63,15 @@ def missing_details(profile,goal):
         if separator:answers[label.strip().casefold()]=value.strip()
     placeholders={'','pendiente','por definir','no sé','no se','?'}
     return [q for q in profile.get('questions',[]) if answers.get(q.casefold(),'').casefold() in placeholders]
+
+
+def conflicting_details(profile,goal):
+    if not profile:return []
+    found={q:[] for q in profile.get('questions',[])}
+    for line in goal.splitlines():
+        label,sep,value=line.partition(':')
+        if not sep:continue
+        for q in found:
+            if label.strip().casefold()==q.casefold() and not missing_details({'questions':[q]},line):
+                if value.strip().casefold() not in [v.casefold() for v in found[q]]:found[q].append(value.strip())
+    return [q for q,values in found.items() if len(values)>1]

@@ -9,6 +9,7 @@ from online import OpenAIProvider,MeteredProvider
 from template_suggestions import TemplateSuggestions
 from teaching_profiles_ui import ProfileEditor
 from teaching_profiles import missing_details
+from clarifications_ui import ClarificationWindow
 
 class SuggestionWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -25,6 +26,7 @@ class SuggestionWindow(tk.Toplevel):
         self.refresh_profiles()
         self.use_sources=tk.BooleanVar(value=False)
         ttk.Checkbutton(self,text='Usar los materiales seleccionados para el chat de este grupo (hasta tres)',variable=self.use_sources).pack(anchor='w',padx=12,pady=4)
+        ttk.Button(self,text='Revisar texto libre y contradicciones con IA',command=self.review_request).pack(anchor='w',padx=12,pady=4)
         ttk.Button(self,text='Pedir propuesta con OpenAI',command=self.request).pack(anchor='w',padx=12,pady=6)
         self.box=tk.Listbox(self,height=5,exportselection=False);self.box.pack(fill='x',padx=12)
         self.preview=tk.Text(self,wrap='word',state='disabled');self.preview.pack(fill='both',expand=True,padx=12,pady=8)
@@ -34,6 +36,8 @@ class SuggestionWindow(tk.Toplevel):
         self.notice=tk.StringVar(value='No se modifica el documento al pedir una propuesta. Revisar exactitud pedagógica y distribución antes de entregar.')
         ttk.Label(self,textvariable=self.notice,wraplength=920).pack(padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.show);self.refresh();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close);self.poll_id=self.after(100,self.poll)
+    def review_request(self):
+        if not self.busy:ClarificationWindow(self)
     def refresh_profiles(self,pid=None):
         self.profile_rows=self.service.profiles.list(self.gid)
         self.profile_box.configure(values=['Sin perfil']+[r['name']+' · '+r['teacher'] for r in self.profile_rows])
