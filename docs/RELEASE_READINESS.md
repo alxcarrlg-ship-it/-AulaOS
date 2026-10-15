@@ -4,9 +4,9 @@
 
 Congelar funciones y corregir problemas de uso. Recorrer con datos sintéticos: escuela/grupo → lista con homónimos → proyecto → formato propio → propuesta revisada → evidencia → exportación. Preparar el instalador y documentar una instalación y actualización reproducibles. No cambiar de interfaz o añadir motores offline grandes durante este cierre.
 
-## Revisión con GitHub Copilot antes de 1.0 (pendiente)
+## Revisión de calidad antes de 1.0
 
-Solicitar una revisión sobre el commit candidato y registrar hallazgos, archivos, correcciones y comprobación. Este documento prepara la revisión; no significa que Copilot ya la haya ejecutado.
+El 15 de octubre de 2026 el usuario retiró Copilot como requisito y autorizó comenzar las pruebas en su PC con la candidata 0.22. Se mantienen las comprobaciones funcionales y la corrección de hallazgos; no se declara realizada una revisión con Copilot.
 
 Prioridades para revisar:
 
@@ -23,6 +23,6 @@ Prioridades para revisar:
 2. Windows limpio: instalación, apertura, DPAPI, micrófono real, exportación en Word/PowerPoint, actualización y desinstalación conservando los datos según la decisión del usuario.
 3. PC básica: medir arranque, memoria y respuesta con una carga representativa, incluida operación básica sin internet.
 4. Recuperación tras cierre forzado, guardado concurrente, respaldo/restauración y migración desde una base 0.x conservada para pruebas.
-5. Revisión con Copilot, resolución de hallazgos críticos y recorrido docente de aceptación.
+5. Resolución de hallazgos críticos y recorrido docente de aceptación en su PC.
 
 La numeración no sustituye estas comprobaciones: 0.22 puede requerir correcciones adicionales antes de publicar 1.0.
