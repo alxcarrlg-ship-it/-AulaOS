@@ -1,0 +1,2 @@
+-r ../lab/requirements.txt
+PyInstaller==6.16.0

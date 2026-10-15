@@ -8,3 +8,7 @@ backups/
 
 *.dpapi
 settings.json
+
+build/
+dist/
+.venv/

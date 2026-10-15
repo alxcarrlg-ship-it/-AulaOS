@@ -18,6 +18,7 @@ class Settings:
         except (OSError,ValueError,TypeError):return dict(DEFAULTS)
     @staticmethod
     def validate(data):
+        if not isinstance(data,dict):raise ValueError('Configuración inválida')
         result={key:data.get(key,value) for key,value in DEFAULTS.items()}
         if result['mode'] not in ('Básico sin conexión','OpenAI online') or result['profile'] not in PROFILES:
             raise ValueError('Configuración de IA inválida')

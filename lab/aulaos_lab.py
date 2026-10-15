@@ -1,4 +1,4 @@
-"""AulaOS internal 0.21-dev: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.22-dev: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -27,6 +27,7 @@ import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from pathlib import Path
 from core import Store, STATUS, today
+from version import VERSION
 
 APP_DIR=Path(os.getenv('AULAOS_DATA_DIR') or (Path(os.getenv('LOCALAPPDATA',Path.home()/'.aulaos_lab'))/'AulaOSLab'))
 APP_DIR.mkdir(parents=True,exist_ok=True)
@@ -35,7 +36,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.21-dev')
+        self.title(f'AulaOS · Desarrollo interno {VERSION}')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -71,7 +72,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.21-dev · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text=f'  DESARROLLO {VERSION} · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
