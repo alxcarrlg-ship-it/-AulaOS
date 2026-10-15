@@ -63,6 +63,8 @@ El modo sin conexión permite consultar registros, leer y guardar materiales. No
 
 285 pruebas de lógica/datos/exportación: 284 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
 
+Para 0.22, las 285 pruebas pasaron también en Windows Server 2022 y se compiló un instalador interno. Siete comprobaciones del ejecutable empaquetado pasaron, incluidas DPAPI, carga de PortAudio y arranque básico de Tk. No sustituye probar instalación, actualización, interfaz completa o micrófono físico. [Registro](docs/QA_0_22_WINDOWS.json).
+
 Para 0.15, una presentación sintética de tres diapositivas exportada por el programa se importó, renderizó e inspeccionó visualmente en Linux. No sustituye la comprobación en PowerPoint para Windows.
 
 Además, tres formatos sintéticos de 3/6/8 columnas renderizados e inspeccionados en Linux para 0.7.
