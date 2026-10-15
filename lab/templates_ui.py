@@ -26,7 +26,7 @@ def open_templates(app,gid):
             schema=json.loads(service.get(gid,item['id'])['schema_json'])
             summary=f"{item['name']} · Docente: {item['teacher'] or 'sin especificar'}\n\n"
             summary+='\n'.join(f"{t['part']}: tabla {t['table']}, {t['columns']} columnas de cuadrícula, {t['rows']} filas"+(' (celdas combinadas)' if t['merged'] else '')+'\nPrimera fila: '+' | '.join(t['first_row']) for t in schema['tables'])
-            summary+=f"\n\n{len(schema['fields'])} párrafos editables · {schema['images']} imágenes · {schema['skipped']} párrafos complejos conservados sin editar.\n\n"+schema['notice']
+            summary+=f"\n\n{len(schema['fields'])} párrafos editables · {schema['images']} imágenes · {schema['skipped']} párrafos complejos conservados sin editar.\n\n"+schema['notice']+'\n'+'\n'.join(schema.get('warnings',[]))
         preview.configure(state='normal');preview.delete('1.0','end');preview.insert('1.0',summary);preview.configure(state='disabled')
     def refresh():
         rows[:]=service.list(gid);box.delete(0,'end')
@@ -77,12 +77,15 @@ class TemplateEditor(tk.Toplevel):
     def __init__(self,app,gid,did):
         super().__init__(app);self.app=app;self.gid=gid;self.did=did;self.service=Templates(app.store)
         doc=self.service.document(gid,did);self.revision=doc['revision'];self.changes=json.loads(doc['changes']);self.saved=dict(self.changes)
-        template=self.service.get(gid,doc['template_id']);self.fields=json.loads(template['schema_json'])['fields'];self.active=None
+        self.tid=doc['template_id'];template=self.service.get(gid,self.tid);self.labels_revision=template['labels_revision'];self.fields=json.loads(template['schema_json'])['fields'];self.active=None
         self.title('Documento con plantilla · '+doc['title']);self.geometry('1000x730')
         ttk.Label(self,text='Selecciona el párrafo o celda que quieres cambiar. El resto del formato se conserva.',wraplength=940).pack(anchor='w',padx=12,pady=8)
         ttk.Label(self,text='El texto nuevo usa el estilo del primer tramo del párrafo. Si crece, puede cambiar la paginación.',wraplength=940).pack(anchor='w',padx=12)
         self.box=tk.Listbox(self,height=11,exportselection=False);self.box.pack(fill='x',padx=12,pady=8)
-        for f in self.fields:self.box.insert('end',f['location']+' · '+(f['text'].replace('\n',' ')[:100] or '[vacío]'))
+        self.refresh_fields()
+        names=ttk.Frame(self);names.pack(fill='x',padx=12)
+        ttk.Button(names,text='Nombrar este campo',command=self.name_field).pack(side='left')
+        ttk.Button(names,text='Volver a la pista automática',command=lambda:self.name_field(reset=True)).pack(side='left',padx=8)
         self.label=tk.StringVar();ttk.Label(self,textvariable=self.label,wraplength=940).pack(anchor='w',padx=12)
         self.body=tk.Text(self,wrap='word',undo=True);self.body.pack(fill='both',expand=True,padx=12,pady=8)
         row=ttk.Frame(self);row.pack(fill='x',padx=12)
@@ -93,6 +96,22 @@ class TemplateEditor(tk.Toplevel):
         ttk.Label(self,textvariable=self.notice,wraplength=940).pack(anchor='w',padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.select);self.box.selection_set(0);self.select()
         self.protocol('WM_DELETE_WINDOW',self.try_close);app.draft_editors.add(self)
+    def refresh_fields(self):
+        self.box.delete(0,'end')
+        for f in self.fields:
+            name=f.get('label') or '[sin identificar]'
+            self.box.insert('end',name+' · '+f['location']+' · '+(f['text'].replace('\n',' ')[:80] or '[vacío]'))
+    def name_field(self,reset=False):
+        if self.active is None:return
+        self.capture();index=self.active;field=self.fields[index]
+        label=None if reset else simpledialog.askstring('Nombre del campo','¿Qué contenido corresponde aquí? Se usará en este formato del grupo, también para orientar propuestas de IA. No cambia el texto del Word.',initialvalue=field.get('label',''),parent=self)
+        if label is None and not reset:return
+        try:
+            self.service.set_label(self.gid,self.tid,field['id'],label,self.labels_revision)
+            template=self.service.get(self.gid,self.tid);self.labels_revision=template['labels_revision'];self.fields=json.loads(template['schema_json'])['fields']
+        except ERRORS as exc:messagebox.showerror('Nombre del campo',str(exc),parent=self);return
+        self.refresh_fields();self.box.selection_set(index);self.active=None;self.select()
+        self.notice.set('Nombre guardado para este formato del grupo. Las propuestas ya guardadas conservan su contexto anterior.')
     def lesson_pack(self):
         if self.save():LessonWindow(self)
     def suggest(self):
@@ -105,7 +124,7 @@ class TemplateEditor(tk.Toplevel):
     def select(self,event=None):
         if not self.box.curselection():return
         self.capture();self.active=self.box.curselection()[0];f=self.fields[self.active]
-        self.label.set(f['location']+' · '+f['id']);self.body.delete('1.0','end');self.body.insert('1.0',self.changes.get(f['id'],f['text']));self.body.edit_reset()
+        self.label.set((f.get('label') or 'Campo sin identificar')+' · '+f['location']+'\nSección: '+(f.get('section_hint') or 'sin identificar')+' · '+('Nombre confirmado por el docente' if f.get('label_custom') else 'Pista automática: '+f.get('hint_source','sin pista')));self.body.delete('1.0','end');self.body.insert('1.0',self.changes.get(f['id'],f['text']));self.body.edit_reset()
     def save(self):
         self.capture()
         try:self.revision=self.service.save(self.gid,self.did,self.changes,self.revision)

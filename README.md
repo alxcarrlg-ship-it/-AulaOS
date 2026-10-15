@@ -1,8 +1,10 @@
 # AulaOS
 
-Asistente docente para Windows, en desarrollo. **0.15 en desarrollo**, sobre los avances de 0.14: propuestas de contenido por campo con fuentes seleccionadas y preparación de acciones en lenguaje natural, siempre revisables. Añade continuidad de proyectos con registros separados de planeado, realizado y pendiente; siguen pendientes las validaciones reales de IA e interfaz. No hay un instalador validado ni se exige que el usuario final instale Python.
+Asistente docente para Windows, en desarrollo. **0.16 en desarrollo**, sobre los avances de 0.15: propuestas de contenido por campo con fuentes seleccionadas y preparación de acciones en lenguaje natural, siempre revisables. Añade continuidad de proyectos con registros separados de planeado, realizado y pendiente; siguen pendientes las validaciones reales de IA e interfaz. No hay un instalador validado ni se exige que el usuario final instale Python.
 
 ## Funciones implementadas
+
+- 0.16: pistas de campos y secciones en Word, nombres corregibles por formato y contexto de IA con esas etiquetas; avisos de altura fija y combinaciones verticales. [Alcance](docs/VERSION_0_16_PROGRESS.md).
 
 - 0.15: paquetes de clase desde una planeación guardada, guía docente y actividad para alumnos en Word, presentación editable en PowerPoint y notas separadas. [Alcance](docs/VERSION_0_15_PROGRESS.md).
 
@@ -47,7 +49,7 @@ El modo sin conexión permite consultar registros, leer y guardar materiales. No
 
 ## Verificación
 
-223 pruebas de lógica/datos/exportación: 222 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+231 pruebas de lógica/datos/exportación: 230 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
 
 Para 0.15, una presentación sintética de tres diapositivas exportada por el programa se importó, renderizó e inspeccionó visualmente en Linux. No sustituye la comprobación en PowerPoint para Windows.
 

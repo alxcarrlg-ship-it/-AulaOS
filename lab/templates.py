@@ -84,9 +84,21 @@ def inspect_template(data):
             sections.append(dict(size.attrib) if size is not None else {})
     if len(fields)>5000:raise ValueError('Máximo 5000 párrafos editables por plantilla.')
     if not fields:raise ValueError('No se encontraron párrafos editables compatibles.')
-    return {'fields':fields,'tables':tables,'sections':sections,'images':sum(n.startswith('word/media/') for n in parts),
-            'skipped':skipped,'notice':'Reconocimiento estructural; revisa qué campos debes cambiar. Las celdas combinadas conservan su geometría. Los párrafos con objetos, campos o revisiones no se editan.'}
+    from template_recognition import enrich
+    return enrich({'fields':fields,'tables':tables,'sections':sections,'images':sum(n.startswith('word/media/') for n in parts),
+            'skipped':skipped,'notice':'Reconocimiento estructural; revisa qué campos debes cambiar. Las celdas combinadas conservan su geometría. Los párrafos con objetos, campos o revisiones no se editan.'},parts)
 
+
+def context_fields(schema,changes):
+    """Compact labels for online context; preserve stable IDs and current text."""
+    result=[]
+    for f in schema['fields']:
+        item={k:f[k] for k in ('id','location')}
+        item['text']=changes.get(f['id'],f['text'])
+        if f.get('label'):item.update(label=f['label'],label_custom=f.get('label_custom',False))
+        if f.get('section_hint'):item['section_hint']=f['section_hint']
+        result.append(item)
+    return result
 
 def validate_changes(schema,changes):
     if not isinstance(changes,dict):raise ValueError('Cambios no válidos.')
@@ -142,6 +154,8 @@ class Templates:
         CREATE TABLE IF NOT EXISTS template_document_revisions(
           document_id INTEGER NOT NULL REFERENCES template_documents(id),revision INTEGER NOT NULL,
           changes TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(document_id,revision));
+        CREATE TABLE IF NOT EXISTS template_field_labels(
+          template_id INTEGER PRIMARY KEY REFERENCES document_templates(id),revision INTEGER NOT NULL,labels_json TEXT NOT NULL);
         ''')
     def import_file(self,gid,path,name,teacher=''):
         path=Path(path)
@@ -155,7 +169,32 @@ class Templates:
     def get(self,gid,tid):
         row=self.store.con.execute('SELECT * FROM document_templates WHERE id=? AND group_id IS ?',(tid,gid)).fetchone()
         if row is None:raise ValueError('Plantilla no disponible en este grupo.')
-        return dict(row)
+        result=dict(row);schema=json.loads(result['schema_json'])
+        if schema.get('recognition_version')!=1:schema=inspect_template(result['data'])
+        labels=self.store.con.execute('SELECT * FROM template_field_labels WHERE template_id=?',(tid,)).fetchone()
+        result['labels_revision']=labels['revision'] if labels else 0
+        custom=json.loads(labels['labels_json']) if labels else {}
+        for field in schema['fields']:
+            field['label']=custom.get(field['id'],field.get('label_hint',''))
+            field['label_custom']=field['id'] in custom
+        result['schema_json']=json.dumps(schema,ensure_ascii=False)
+        return result
+    def set_label(self,gid,tid,field_id,label,expected_revision):
+        if label is not None and (not isinstance(label,str) or len(label)>120 or any(ord(c)<32 for c in label)):
+            raise ValueError('Nombre de campo: hasta 120 caracteres, sin saltos de línea.')
+        con=self.store.con;con.execute('BEGIN IMMEDIATE')
+        try:
+            template=self.get(gid,tid)
+            if template['labels_revision']!=expected_revision:raise RevisionConflict('Otro editor cambió los nombres de campo; vuelve a abrir el documento.')
+            if field_id not in {f['id'] for f in json.loads(template['schema_json'])['fields']}:raise ValueError('Campo ajeno a la plantilla.')
+            row=con.execute('SELECT labels_json FROM template_field_labels WHERE template_id=?',(tid,)).fetchone()
+            labels=json.loads(row[0]) if row else {}
+            if label is None:labels.pop(field_id,None)
+            else:labels[field_id]=label.strip()
+            rev=expected_revision+1
+            con.execute('INSERT INTO template_field_labels VALUES(?,?,?) ON CONFLICT(template_id) DO UPDATE SET revision=excluded.revision,labels_json=excluded.labels_json',(tid,rev,json.dumps(labels,ensure_ascii=False)))
+            con.commit();return rev
+        except Exception:con.rollback();raise
     def list(self,gid):
         return [dict(r) for r in self.store.con.execute('SELECT id,name,teacher,created_at FROM document_templates WHERE group_id IS ? ORDER BY id DESC',(gid,))]
     def create(self,gid,tid,title):
