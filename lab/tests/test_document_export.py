@@ -66,7 +66,7 @@ class ExportTests(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 path=self.root/('output'+suffix);self.assertEqual(export_document('Guía',CONTENT,path),path)
                 self.assertTrue(path.stat().st_size>100)
-                if suffix!='.docx':self.assertIn('reflexión',path.read_text())
+                if suffix!='.docx':self.assertIn('reflexión',path.read_text(encoding='utf-8'))
     def test_reject_extension_and_invalid_content_without_writing(self):
         for name,content in [('file.pdf',CONTENT),('file.docx','bad\x01'),('file.html','')]:
             with self.subTest(name=name),self.assertRaises(ValueError):export_document('Title',content,self.root/name)
