@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk,messagebox
 from projects import Projects,FIELDS,LABELS,describe
+from evidence_ui import EvidenceWindow
 
 class ProjectEditor(tk.Toplevel):
     def __init__(self,app,gid,pid=None):
@@ -72,6 +73,7 @@ class ProjectsWindow(tk.Toplevel):
         controls=ttk.Frame(self);controls.pack(fill='x',padx=12)
         ttk.Button(controls,text='Nuevo proyecto',command=lambda:self.edit(True)).pack(side='left')
         ttk.Button(controls,text='Registrar avance / editar',command=self.edit).pack(side='left',padx=8)
+        ttk.Button(controls,text='Evidencias y seguimiento',command=self.evidence).pack(side='left')
         ttk.Button(controls,text='Actualizar',command=self.refresh).pack(side='left')
         self.body=tk.Text(self,wrap='word',state='disabled');self.body.pack(fill='both',expand=True,padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.show);self.refresh()
@@ -83,6 +85,8 @@ class ProjectsWindow(tk.Toplevel):
     def show(self,event=None):
         row=self.rows[self.box.curselection()[0]] if self.box.curselection() else None
         self.body.configure(state='normal');self.body.delete('1.0','end');self.body.insert('1.0',describe(row));self.body.configure(state='disabled')
+    def evidence(self):
+        if self.box.curselection():EvidenceWindow(self.app,self.gid,self.rows[self.box.curselection()[0]]['id'])
     def edit(self,new=False):
         if not new and not self.box.curselection():return
         pid=None if new else self.rows[self.box.curselection()[0]]['id']
