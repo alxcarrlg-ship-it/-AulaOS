@@ -10,6 +10,8 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
+from migrations import prepare,upgrade
+from roster_identity import identifier,header_index,resolve
 
 STATUS = {'A':'Asistencia','F':'Falta','R':'Retardo','J':'Justificada'}
 
@@ -28,6 +30,8 @@ class Store:
         self.con.row_factory=sqlite3.Row
         self.con.execute('PRAGMA foreign_keys=ON')
         self.con.execute('PRAGMA busy_timeout=5000')
+        try:self.migration_backup=prepare(self.con,self.db_path)
+        except Exception:self.con.close();raise
         self.con.executescript('''
         CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY,school_id INTEGER NOT NULL REFERENCES schools(id),name TEXT NOT NULL,source_path TEXT,source_stamp TEXT, UNIQUE(school_id,name));
@@ -40,6 +44,8 @@ class Store:
         CREATE INDEX IF NOT EXISTS idx_event_student ON events(student_id,day);
         ''')
         self.con.commit()
+        try:upgrade(self.con)
+        except Exception:self.con.close();raise
     def backup(self):
         """Consistent SQLite backup; rotate last 20 copies. Never sync live WAL DB."""
         out=Path(self.db_path).parent/'backups';out.mkdir(exist_ok=True)
@@ -117,26 +123,32 @@ class Store:
             if not reader.fieldnames:raise ValueError('CSV sin encabezado')
             key=next((x for x in reader.fieldnames if normalize(x) in ['nombre','alumno','nombre del alumno','nombre del alumno(a)']),None)
             if key is None:raise ValueError('El CSV necesita columna Nombre o Alumno')
-            roster=[(i,(row.get(key) or '').strip()) for i,row in enumerate(reader,start=2) if (row.get(key) or '').strip()]
+            index=header_index(reader.fieldnames,normalize);id_key=reader.fieldnames[index] if index is not None else None
+            roster=[dict(row=i,name=(row.get(key) or '').strip(),external_id=identifier(row.get(id_key)) if id_key else None,marks=[]) for i,row in enumerate(reader,start=2) if (row.get(key) or '').strip()]
         if not roster:raise ValueError('CSV sin alumnos; no se aplicaron cambios')
-        from collections import Counter,defaultdict
-        if any(n>1 for n in Counter(normalize(name) for _,name in roster).values()):
-            raise ValueError('Hay nombres idénticos en el CSV; revisa los homónimos antes de importar')
-        known=defaultdict(list)
-        for student in self.con.execute('SELECT id,name FROM students WHERE group_id=?',(gid,)):
-            known[normalize(student['name'])].append(student['id'])
-        if any(len(known[normalize(name)])>1 for _,name in roster):
-            raise ValueError('Identidades registradas ambiguas; no se aplicaron cambios')
-        with self.con:
-            # Rows indicate display order, never student identity. Preserve unlisted records.
+        self.con.execute('BEGIN IMMEDIATE')
+        try:
+            known=[dict(r) for r in self.con.execute('SELECT * FROM students WHERE group_id=?',(gid,))]
+            resolved=resolve(known,roster,normalize)
             self.con.execute('UPDATE students SET source_row=NULL WHERE group_id=? AND source_row>0',(gid,))
-            for row,name in roster:
-                matches=known[normalize(name)]
-                if matches:
-                    self.con.execute('UPDATE students SET source_row=?,name=?,active=1 WHERE id=?',(row,name,matches[0]))
-                else:
-                    self.con.execute('INSERT INTO students(group_id,name,source_row) VALUES(?,?,?)',(gid,name,row))
-        return f'Importados {len(roster)} nombres (CSV de solo lectura).'
+            for item in resolved:self._apply_roster_student(gid,item)
+            self.con.commit()
+        except Exception:self.con.rollback();raise
+        return f'Importados {len(roster)} alumnos; matrícula cuando está disponible (CSV de solo lectura).'
+    def _apply_roster_student(self,gid,item):
+        if item['student_id'] is None:
+            return self.con.execute('INSERT INTO students(group_id,name,source_row,external_id) VALUES(?,?,?,?)',(gid,item['name'],item['row'],item['external_id'])).lastrowid
+        self.con.execute('UPDATE students SET name=?,source_row=?,external_id=?,active=1 WHERE id=? AND group_id=?',(item['name'],item['row'],item['external_id'],item['student_id'],gid))
+        return item['student_id']
+    def set_student_identifier(self,gid,sid,value,expected=None):
+        self._require_membership(gid,sid);value=identifier(value)
+        self.con.execute('BEGIN IMMEDIATE')
+        try:
+            old=self.con.execute('SELECT external_id FROM students WHERE id=?',(sid,)).fetchone()[0]
+            if old!=expected:raise ValueError('La matrícula cambió en otra ventana; actualiza la lista.')
+            self.con.execute('UPDATE students SET external_id=? WHERE id=?',(value,sid));self.con.commit()
+        except sqlite3.IntegrityError as exc:self.con.rollback();raise ValueError('Esa matrícula ya pertenece a otro alumno del grupo.') from exc
+        except Exception:self.con.rollback();raise
     def import_excel(self,gid,path,force=False):
         try:
             import openpyxl
@@ -160,6 +172,7 @@ class Store:
                 if i>=35:break
             if header is None:raise ValueError('No encontré el encabezado de alumnos (primeras 35 filas).')
             nhead,values,name_col=header
+            id_col=header_index(values,normalize)
             dates=[]
             for j,val in enumerate(values):
                 if j<=name_col:continue
@@ -181,39 +194,19 @@ class Store:
                 for col,day in dates:
                     val=str(values[col] if col<len(values) and values[col] is not None else '').strip().upper()
                     if val in STATUS:marks.append((day,val))
-                rosters.append((row_idx,name.strip(),marks))
+                external=identifier(values[id_col] if id_col<len(values) else None) if id_col is not None else None
+                rosters.append(dict(row=row_idx,name=name.strip(),marks=marks,external_id=external))
         finally:wb.close()
         if not rosters:raise ValueError('No encontré estudiantes; no se aplicaron cambios.')
-        from collections import Counter
-        repetitions=[name for name,n in Counter(normalize(person) for _,person,_ in rosters).items() if n>1]
-        if repetitions:
-            raise ValueError('Hay nombres idénticos en la lista, por lo que no puedo identificar a cada alumno con seguridad. Revisa los homónimos o agrega un identificador estable antes de importar: '+', '.join(repetitions[:5]))
-        from collections import defaultdict
-        known=list(self.con.execute('SELECT id,name,source_row FROM students WHERE group_id=?',(gid,)))
-        by_name=defaultdict(list)
-        for r in known:by_name[normalize(r['name'])].append(r)
-        ambiguous=[name for name,items in by_name.items() if len(items)>1 and name in {normalize(person) for _,person,_ in rosters}]
-        if ambiguous:
-            raise ValueError('Identidades registradas ambiguas. Revisa los homónimos antes de actualizar el historial: '+', '.join(ambiguous[:5]))
         used=set();marked=0;conflicts=0;new_people=0;identity_warnings=0
-        with self.con:
-            # Release prior positive row numbers: Excel sorting must not reassign events.
+        self.con.execute('BEGIN IMMEDIATE')
+        try:
+            known=[dict(r) for r in self.con.execute('SELECT * FROM students WHERE group_id=?',(gid,))]
+            resolved=resolve(known,rosters,normalize)
             self.con.execute('UPDATE students SET source_row=NULL WHERE group_id=? AND source_row>0',(gid,))
-            for row_idx,name,marks in rosters:
-                available=[r for r in by_name[normalize(name)] if r['id'] not in used]
-                if len(available)==1:chosen=available[0]
-                elif len(available)>1:
-                    same=[r for r in available if r['source_row']==row_idx]
-                    chosen=same[0] if len(same)==1 else None
-                    if chosen is None:identity_warnings+=1
-                else:chosen=None
-                if chosen is None:
-                    sid=self.con.execute('INSERT INTO students(group_id,name,source_row) VALUES(?,?,?)',(gid,name,row_idx)).lastrowid
-                    new_people+=1
-                else:
-                    sid=chosen['id']
-                    self.con.execute('UPDATE students SET name=?,source_row=?,active=1 WHERE id=?',(name,row_idx,sid))
-                used.add(sid)
+            for item in resolved:
+                if item['student_id'] is None:new_people+=1
+                sid=self._apply_roster_student(gid,item);used.add(sid);marks=item['marks']
                 for day,val in marks:
                     old=self.con.execute('SELECT status,origin FROM attendance WHERE student_id=? AND day=?',(sid,day)).fetchone()
                     if old and old['origin']=='manual':
@@ -230,6 +223,8 @@ class Store:
                     self.con.execute('UPDATE students SET active=0 WHERE id=?',(old['id'],))
                     identity_warnings+=1
             self.con.execute('UPDATE groups SET source_path=?,source_stamp=? WHERE id=?',(str(p),stamp,gid))
+            self.con.commit()
+        except Exception:self.con.rollback();raise
         warning=f' Avisos de identidad: {identity_warnings}; revisa nombres cambiados/homónimos.' if identity_warnings else ''
         return f'{len(rosters)} alumnos; {new_people} identidades nuevas; {marked} marcas nuevas/actualizadas; {conflicts} conflictos de asistencia.{warning} Excel NO modificado.'
     def unresolved_conflicts(self,gid):

@@ -1,4 +1,4 @@
-"""AulaOS internal 0.18-dev: local records/materials and optional OpenAI chat."""
+"""AulaOS internal 0.19-dev: local records/materials and optional OpenAI chat."""
 import datetime as dt
 import os
 import threading
@@ -33,7 +33,7 @@ DB_FILE=APP_DIR/'aulaos.sqlite3'
 class AulaOS(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('AulaOS · Desarrollo interno 0.18-dev')
+        self.title('AulaOS · Desarrollo interno 0.19-dev')
         self.geometry('1150x800');self.minsize(875,600)
         self.configure(bg='#f3f6fb')
         self.store=Store(DB_FILE)
@@ -69,7 +69,7 @@ class AulaOS(tk.Tk):
     def _build(self):
         top=ttk.Frame(self,padding=(17,14,17,8));top.pack(fill='x')
         ttk.Label(top,text='AulaOS',style='Title.TLabel').pack(side='left')
-        ttk.Label(top,text='  DESARROLLO 0.18-dev · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
+        ttk.Label(top,text='  DESARROLLO 0.19-dev · DATOS LOCALES',foreground='#698398').pack(side='left',padx=8)
         context=ttk.Frame(self,padding=(18,4));context.pack(fill='x')
         ttk.Label(context,text='Escuela y grupo:').pack(side='left')
         self.group_box=ttk.Combobox(context,state='readonly',width=38)
@@ -93,9 +93,9 @@ class AulaOS(tk.Tk):
     def _attendance(self):
         ttk.Label(self.tab_att,text='↑ Presente     ↓ Falta     ← Justificada     → Retardo     · Al marcar avanza al siguiente estudiante',foreground='#506980').pack(anchor='w',pady=(0,10))
         frame=ttk.Frame(self.tab_att);frame.pack(fill='both',expand=True)
-        self.stree=ttk.Treeview(frame,columns=('name','status'),show='headings',selectmode='browse')
-        self.stree.heading('name',text='Estudiante');self.stree.heading('status',text='Registro del día')
-        self.stree.column('name',width=450);self.stree.column('status',width=200)
+        self.stree=ttk.Treeview(frame,columns=('name','identifier','status'),show='headings',selectmode='browse')
+        self.stree.heading('name',text='Estudiante');self.stree.heading('identifier',text='Matrícula');self.stree.heading('status',text='Registro del día')
+        self.stree.column('identifier',width=140);self.stree.column('name',width=350);self.stree.column('status',width=200)
         self.stree.pack(side='left',fill='both',expand=True)
         sb=ttk.Scrollbar(frame,orient='vertical',command=self.stree.yview);sb.pack(side='right',fill='y');self.stree.configure(yscrollcommand=sb.set)
         self.stree.bind('<<TreeviewSelect>>',lambda e:self.selected())
@@ -104,6 +104,7 @@ class AulaOS(tk.Tk):
         buttons=ttk.Frame(self.tab_att);buttons.pack(fill='x',pady=8)
         for k,label in [('A','↑ Presente'),('F','↓ Falta'),('J','← Justificada'),('R','→ Retardo')]:
             ttk.Button(buttons,text=label,command=lambda x=k:self.mark_current(x)).pack(side='left',padx=3)
+        ttk.Button(buttons,text='Matrícula del alumno',command=self.edit_identifier).pack(side='right',padx=3)
         ttk.Button(buttons,text='+ Agregar alumno',command=self.manual_student).pack(side='right',padx=3)
         ttk.Button(buttons,text='Actualizar desde archivo',command=lambda:self.reimport(True)).pack(side='right',padx=3)
     def _notes(self):
@@ -343,7 +344,7 @@ class AulaOS(tk.Tk):
         if self.gid is None:return
         day=self.get_day(quiet=True);marks=self.store.marks(self.gid,day) if day else {}
         for r in self.store.students(self.gid):
-            self.stree.insert('',tk.END,iid=str(r['id']),values=(r['name'],STATUS.get(marks.get(r['id']), '—')))
+            self.stree.insert('',tk.END,iid=str(r['id']),values=(r['name'],r['external_id'] or '—',STATUS.get(marks.get(r['id']), '—')))
             self.students_by_name[f"{r['name']}  ·  #{r['id']}"]=r['id']
         names=list(self.students_by_name)
         self.student_note_box['values']=names
@@ -366,10 +367,21 @@ class AulaOS(tk.Tk):
         if not ids:return 'break'
         sid=int(ids[0]);children=self.stree.get_children();i=children.index(ids[0]);day=self.get_day()
         self.store.mark(self.gid,sid,day,value)
-        self.stree.item(ids[0],values=(self.stree.item(ids[0],'values')[0],STATUS[value]))
+        self.stree.item(ids[0],values=(*self.stree.item(ids[0],'values')[:2],STATUS[value]))
         if i+1<len(children):
             nxt=children[i+1];self.stree.selection_set(nxt);self.stree.focus(nxt);self.stree.see(nxt)
         self.toast(f'{STATUS[value]} registrada para {day}. Guardada localmente.');return 'break'
+    def edit_identifier(self):
+        selected=self.stree.selection()
+        if not selected or self.gid is None:return
+        sid=int(selected[0]);row=next((r for r in self.store.students(self.gid) if r['id']==sid),None)
+        if row is None:return
+        value=simpledialog.askstring('Matrícula local',f"{row['name']} · ID interno {sid}\nMatrícula opcional; conserva ceros iniciales. Deja vacío para quitarla. No hace falta CURP.",initialvalue=row['external_id'] or '',parent=self)
+        if value is None:return
+        if not messagebox.askyesno('Confirmar identidad',f"¿Asignar esta matrícula a {row['name']} (#{sid})?\n{value.strip() or '(sin matrícula)'}\nSe usará para reconocerlo al importar listas. Revisa que corresponda a este alumno.",parent=self):return
+        try:self.store.set_student_identifier(self.gid,sid,value,row['external_id'])
+        except Exception as exc:messagebox.showerror('Matrícula',str(exc),parent=self);return
+        self.refresh_students()
     def manual_student(self):
         if not self.gid:return
         name=simpledialog.askstring('Alumno','Nombre del estudiante:',parent=self)
