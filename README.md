@@ -1,9 +1,10 @@
 # AulaOS
 
-Asistente docente para Windows, en desarrollo. **0.12: alcance de implementación completado, pendiente de validación real**, sobre los avances de 0.11: propuestas de contenido por campo con fuentes seleccionadas y preparación de acciones en lenguaje natural, siempre revisables. Añade perfiles explícitos por escuela y docente; siguen pendientes las validaciones reales de IA e interfaz. No hay un instalador validado ni se exige que el usuario final instale Python.
+Asistente docente para Windows, en desarrollo. **0.13 en desarrollo**, sobre los avances de 0.12: propuestas de contenido por campo con fuentes seleccionadas y preparación de acciones en lenguaje natural, siempre revisables. Añade continuidad de proyectos con registros separados de planeado, realizado y pendiente; siguen pendientes las validaciones reales de IA e interfaz. No hay un instalador validado ni se exige que el usuario final instale Python.
 
 ## Funciones implementadas
 
+- 0.13: proyectos por grupo, avance versionado, vínculos a planeaciones y contexto explícito para la siguiente propuesta. [Alcance](docs/VERSION_0_13_PROGRESS.md).
 - 0.12: aclaraciones configurables, detección local de respuestas duplicadas incompatibles y revisión online opcional de texto libre/contradicciones con evidencia, historial y confirmación. [Alcance y pendientes](docs/VERSION_0_12_PROGRESS.md).
 - Avance 0.11: perfiles locales por escuela/docente, selección explícita al generar y copia de requisitos en cada propuesta. [Alcance](docs/VERSION_0_11_PROGRESS.md).
 - Avance 0.10: guardar y recuperar revisiones manuales de propuestas sin aplicarlas, con protección entre ventanas. [Alcance y pendientes](docs/VERSION_0_10_PROGRESS.md).
@@ -43,7 +44,7 @@ El modo sin conexión permite consultar registros, leer y guardar materiales. No
 
 ## Verificación
 
-193 pruebas de lógica/datos/exportación: 192 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
+205 pruebas de lógica/datos/exportación: 204 pasan en Linux y 1 de DPAPI queda omitida por requerir Windows. Incluyen aislamiento entre grupos, fuentes seleccionadas, persistencia, reintentos, errores, costos simulados, formatos documentales, investigación con fuentes migración desde 0.3, borradores versionados, conflictos entre conexiones y protección de archivos exportados. Compilación sintáctica correcta. Word sintético de dos páginas renderizado y revisado visualmente en Linux, incluidos tablas, encabezados repetidos, márgenes y enlaces; no sustituye la validación en Word para Windows. Las llamadas a OpenAI y la captura del micrófono se simulan; falta validación real con credencial y hardware. No se declara calidad pedagógica evaluada ni protección absoluta ante instrucciones maliciosas en documentos.
 
 Además, tres formatos sintéticos de 3/6/8 columnas renderizados e inspeccionados en Linux para 0.7.
 

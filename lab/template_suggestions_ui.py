@@ -10,6 +10,8 @@ from template_suggestions import TemplateSuggestions
 from teaching_profiles_ui import ProfileEditor
 from teaching_profiles import missing_details
 from clarifications_ui import ClarificationWindow
+from projects_ui import ProjectEditor
+from projects import describe
 
 class SuggestionWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -24,6 +26,12 @@ class SuggestionWindow(tk.Toplevel):
         ttk.Button(profile_bar,text='Nuevo',command=lambda:self.edit_profile(True)).pack(side='left')
         ttk.Button(profile_bar,text='Ver / editar',command=self.edit_profile).pack(side='left',padx=6)
         self.refresh_profiles()
+        project_bar=ttk.Frame(self);project_bar.pack(fill='x',padx=12,pady=4)
+        ttk.Label(project_bar,text='Continuidad del grupo:').pack(side='left')
+        self.project_box=ttk.Combobox(project_bar,state='readonly',width=38);self.project_box.pack(side='left',padx=6)
+        ttk.Button(project_bar,text='Nuevo proyecto',command=lambda:self.edit_project(True)).pack(side='left')
+        ttk.Button(project_bar,text='Ver / registrar avance',command=self.edit_project).pack(side='left',padx=6)
+        self.refresh_projects()
         self.use_sources=tk.BooleanVar(value=False)
         ttk.Checkbutton(self,text='Usar los materiales seleccionados para el chat de este grupo (hasta tres)',variable=self.use_sources).pack(anchor='w',padx=12,pady=4)
         ttk.Button(self,text='Revisar texto libre y contradicciones con IA',command=self.review_request).pack(anchor='w',padx=12,pady=4)
@@ -36,6 +44,20 @@ class SuggestionWindow(tk.Toplevel):
         self.notice=tk.StringVar(value='No se modifica el documento al pedir una propuesta. Revisar exactitud pedagógica y distribución antes de entregar.')
         ttk.Label(self,textvariable=self.notice,wraplength=920).pack(padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.show);self.refresh();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close);self.poll_id=self.after(100,self.poll)
+    def refresh_projects(self,pid=None):
+        self.project_rows=self.service.projects.list(self.gid)
+        self.project_box.configure(values=['Sin proyecto']+[r['title']+' · #'+str(r['id']) for r in self.project_rows])
+        self.project_box.current(next((i+1 for i,r in enumerate(self.project_rows) if r['id']==pid),0))
+    def selected_project(self):
+        index=self.project_box.current()
+        return self.project_rows[index-1] if index>0 else None
+    def edit_project(self,new=False):
+        if self.busy:return
+        row=None if new else self.selected_project()
+        if not new and row is None:messagebox.showinfo('Proyecto','Selecciona un proyecto o crea uno nuevo.',parent=self);return
+        dialog=ProjectEditor(self.app,self.gid,row['id'] if row else None)
+        self.wait_window(dialog)
+        if self.winfo_exists():self.refresh_projects(dialog.result or (row['id'] if row else None))
     def review_request(self):
         if not self.busy:ClarificationWindow(self)
     def refresh_profiles(self,pid=None):
@@ -66,6 +88,8 @@ class SuggestionWindow(tk.Toplevel):
             text='PETICIÓN\n'+row['goal']+'\n\nNOTAS DE LA IA (revisar)\n'+row['notes']+'\n\n'
             profile=json.loads(row['profile_json'])
             if profile:text+='PERFIL UTILIZADO · '+profile['name']+' · '+profile['teacher']+' · v'+str(profile['revision'])+'\n'+profile['requirements']+'\n\n'
+            project=json.loads(row['project_json'])
+            if project:text+='AVANCE UTILIZADO\n'+describe(project)+'\n'
             sources=json.loads(row['sources_json'])
             text+='FUENTES ENVIADAS\n'+('\n'.join('['+s['source']+'] '+s['title'] for s in sources) or 'Ninguna')+'\n\n'
             differences=self.service.review(self.gid,row['id'])
@@ -83,6 +107,7 @@ class SuggestionWindow(tk.Toplevel):
         if not self.editor.save():return
         goal=self.goal.get('1.0','end-1c').strip();revision=self.editor.revision
         material_ids=list(self.app.attachments.get(self.gid,[])) if self.use_sources.get() else []
+        project=self.selected_project();project_id=project['id'] if project else None;project_revision=project['revision'] if project else None
         profile=self.selected_profile();profile_id=profile['id'] if profile else None;profile_revision=profile['revision'] if profile else None
         try:
             snapshot=self.service.profiles.snapshot(self.gid,profile_id,profile_revision)
@@ -93,21 +118,24 @@ class SuggestionWindow(tk.Toplevel):
                 if dialog.result is None:return
                 self.goal.insert('end','\n'+dialog.result)
                 goal=self.goal.get('1.0','end-1c').strip()
-            _,_,messages=self.service.context(self.gid,self.did,goal,revision,material_ids,profile_id,profile_revision)
-            sources=json.loads(messages[-1]['content'])['sources']
+            _,_,messages=self.service.context(self.gid,self.did,goal,revision,material_ids,profile_id,profile_revision,project_id,project_revision)
+            payload=json.loads(messages[-1]['content']);sources=payload['sources'];project_snapshot=payload['project_progress']
         except Exception as exc:messagebox.showerror('Propuesta',str(exc),parent=self);return
         if not self.app.api_key:self.app.configure_online()
         if not self.app.api_key:return
         source_names=', '.join('['+s['source']+'] '+s['title'] for s in sources) or 'ninguna'
         profile_notice=('\nPerfil: '+profile['name']+' · '+profile['teacher']+'\n'+profile['requirements']) if profile else '\nSin perfil docente.'
-        if not messagebox.askyesno('Enviar campos a OpenAI','Se enviarán tu petición y los textos actuales de los párrafos editables. Fuentes: '+source_names+'. Pueden contener datos personales. No se envían el Word, imágenes, otros registros ni historial. La consulta consume API.'+profile_notice+'\n¿Continuar?',parent=self):return
+        project_notice='\nAVANCE DEL PROYECTO QUE SE ENVIARÁ\n'+describe(project_snapshot)
+        consent=SendPreview(self,'Se enviarán tu petición y los textos actuales de los párrafos editables. Fuentes: '+source_names+'. Pueden contener datos personales. No se envían el Word, imágenes, otros registros ni historial. La consulta consume API.'+profile_notice+project_notice)
+        self.wait_window(consent)
+        if not consent.accepted:return
         settings=dict(self.app.settings);key=self.app.api_key;db=self.app.store.db_path;gid=self.gid;did=self.did
         self.busy=True;self.show();self.notice.set('Preparando propuesta… El documento no se modificará hasta que la aceptes.')
         def work():
             store=None
             try:
                 store=Store(db);provider=MeteredProvider(store,OpenAIProvider(key,settings['profile'],settings['max_output_tokens']),settings['monthly_limit'])
-                sid=TemplateSuggestions(store).propose(gid,did,goal,revision,provider,material_ids,profile_id,profile_revision);self.results.put((sid,None))
+                sid=TemplateSuggestions(store).propose(gid,did,goal,revision,provider,material_ids,profile_id,profile_revision,project_id,project_revision);self.results.put((sid,None))
             except Exception as exc:self.results.put((None,str(exc)))
             finally:
                 if store:store.close()
@@ -228,3 +256,18 @@ class DetailsDialog(tk.Toplevel):
         if any(v.get().strip() for v in self.answers):
             if not messagebox.askyesno('Cancelar aclaraciones','¿Descartar estas respuestas? Tu petición anterior permanecerá intacta.',parent=self):return
         self.destroy()
+
+
+class SendPreview(tk.Toplevel):
+    def __init__(self,parent,text):
+        super().__init__(parent);self.accepted=False;self.title('Revisar contexto antes de enviar');self.geometry('800x600');self.transient(parent)
+        ttk.Label(self,text='Revisa el perfil, las fuentes seleccionadas y el avance del proyecto antes de enviar.',wraplength=760).pack(padx=12,pady=10)
+        pane=ttk.Frame(self);pane.pack(fill='both',expand=True,padx=12)
+        body=tk.Text(pane,wrap='word');scroll=ttk.Scrollbar(pane,command=body.yview);body.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right',fill='y');body.pack(side='left',fill='both',expand=True)
+        body.insert('1.0',text);body.configure(state='disabled')
+        controls=ttk.Frame(self);controls.pack(fill='x',padx=12,pady=12)
+        ttk.Button(controls,text='Confirmar envío a OpenAI',command=self.accept).pack(side='left')
+        ttk.Button(controls,text='Cancelar',command=self.destroy).pack(side='left',padx=8)
+        self.grab_set()
+    def accept(self):self.accepted=True;self.destroy()
