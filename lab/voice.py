@@ -80,7 +80,12 @@ class Transcriber:
             except (ValueError,AttributeError):pass
             raise classify_http(exc.code,code) from None
         except ssl.SSLError:raise OnlineError('security','No se pudo verificar la conexión segura.') from None
-        except (URLError,OSError,socket.timeout):raise OnlineError('connection','No se completó la transcripción. Puedes reintentar manualmente; podría haber consumo.') from None
+        except socket.timeout:raise OnlineError('timeout','La transcripción agotó la espera; podría haber consumo. No se reintentó.') from None
+        except URLError as exc:
+            if isinstance(exc.reason,ssl.SSLError):raise OnlineError('security','No se pudo verificar la conexión segura.') from None
+            if isinstance(exc.reason,socket.timeout):raise OnlineError('timeout','La transcripción agotó la espera; podría haber consumo.') from None
+            raise OnlineError('connection','No se pudo conectar para transcribir. Revisa red y servicio.') from None
+        except OSError:raise OnlineError('connection','No se completó la transcripción. Puedes reintentar manualmente; podría haber consumo.') from None
         except (ValueError,TypeError):raise OnlineError('protocol','Respuesta de transcripción ilegible.') from None
 
 

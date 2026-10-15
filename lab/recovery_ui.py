@@ -7,8 +7,8 @@ from recovery import Recovery
 
 class RecoveryController:
     INTERVAL=10000
-    def __init__(self,editor,kind,read,apply):
-        self.editor=editor;self.kind=kind;self.read=read;self.apply=apply;self.service=Recovery(editor.app.store)
+    def __init__(self,editor,kind,read,apply,target=None,revision=None):
+        self.target_fn=target;self.revision_fn=revision;self.editor=editor;self.kind=kind;self.read=read;self.apply=apply;self.service=Recovery(editor.app.store)
         self.token=uuid.uuid4().hex;self.last=None;self.recovered=set()
         if not hasattr(editor.app,'recovery_active'):editor.app.recovery_active=set()
         editor.app.recovery_active.add(self.token)
@@ -18,15 +18,25 @@ class RecoveryController:
         ttk.Label(bar,textvariable=self.status,wraplength=650).pack(side='left',padx=8)
         if self.candidates():self.status.set('Hay copias de trabajo anteriores disponibles en «Recuperar trabajo».')
         self.timer=editor.after(self.INTERVAL,self.tick)
+        editor.bind('<Destroy>',self.destroyed,add='+')
+    def destroyed(self,event):
+        if event.widget is self.editor:
+            try:self.editor.after_cancel(self.timer)
+            except Exception:pass
+            self.editor.app.recovery_active.discard(self.token)
+    def target(self):return self.target_fn() if getattr(self,'target_fn',None) else self.editor.did
+    def revision(self):return self.revision_fn() if getattr(self,'revision_fn',None) else self.editor.revision
+    def discard(self):
+        self.service.delete(self.editor.gid,self.token);self.last=None;self.recovered.clear()
     def candidates(self):
-        return [r for r in self.service.list(self.editor.gid,self.kind,self.editor.did) if r['token'] not in self.editor.app.recovery_active]
+        return [r for r in self.service.list(self.editor.gid,self.kind,self.target()) if r['token'] not in self.editor.app.recovery_active]
     def tick(self):
         try:
             payload=self.read()
             if self.editor.dirty():
-                signature=(self.editor.did,self.editor.revision,json.dumps(payload,ensure_ascii=False,sort_keys=True))
+                signature=(self.target(),self.revision(),json.dumps(payload,ensure_ascii=False,sort_keys=True))
                 if signature!=self.last:
-                    self.service.put(self.token,self.editor.gid,self.kind,self.editor.did,self.editor.revision,payload)
+                    self.service.put(self.token,self.editor.gid,self.kind,self.target(),self.revision(),payload)
                     self.last=signature;self.status.set('Copia de recuperación actualizada en este equipo.')
             elif self.last is not None:
                 self.service.delete(self.editor.gid,self.token);self.last=None
@@ -50,7 +60,7 @@ class RecoveryController:
         self.editor.app.recovery_active.discard(self.token)
     def open(self):
         rows=self.candidates()
-        if not rows:messagebox.showinfo('Recuperación','No hay copias de otras sesiones para este documento. Los borradores nuevos se recuperan desde Nuevo borrador.',parent=self.editor);return
+        if not rows:messagebox.showinfo('Recuperación','No hay copias de otras sesiones para este registro. Para recuperar un registro nuevo sin guardar, abre primero el formulario Nuevo del mismo tipo.',parent=self.editor);return
         win=tk.Toplevel(self.editor);win.title('Recuperar trabajo local');win.geometry('800x600')
         box=tk.Listbox(win,height=5,exportselection=False);box.pack(fill='x',padx=12,pady=8)
         for r in rows:box.insert('end',f"{r['updated_at']} · base v{r['base_revision'] or 0} · sesión {r['token'][:8]}")
@@ -63,15 +73,15 @@ class RecoveryController:
         def recover():
             row=chosen()
             if not row:return
-            if not messagebox.askyesno('Recuperar en el editor','Se reemplazará el texto abierto, sin guardar una versión. Si la versión base quedó antigua, Guardar versión rechazará el conflicto; podrás usar Guardar copia. ¿Continuar?',parent=win):return
+            if not messagebox.askyesno('Recuperar en el editor','Se reemplazará el texto abierto, sin guardar una versión. Si la versión base quedó antigua, el guardado rechazará el conflicto; conserva el texto y revisa la versión actual antes de continuar. ¿Continuar?',parent=win):return
             try:
                 row=self.service.get(self.editor.gid,row['token'])
-                self.service.validate(self.editor.gid,self.kind,self.editor.did,row['base_revision'],row['payload'])
+                self.service.validate(self.editor.gid,self.kind,self.target(),row['base_revision'],row['payload'])
                 self.apply(row['payload'],row['base_revision']);self.recovered.add(row['token']);self.last=None
                 # Capture immediately after recovery, rather than waiting for the timer.
-                self.service.put(self.token,self.editor.gid,self.kind,self.editor.did,self.editor.revision,self.read())
+                self.service.put(self.token,self.editor.gid,self.kind,self.target(),self.revision(),self.read())
             except Exception as exc:messagebox.showerror('Recuperación',str(exc),parent=win);return
-            self.status.set('Texto recuperado; revisa y guarda una versión o una copia.');win.destroy()
+            self.status.set('Texto recuperado; revisa antes de guardarlo.');win.destroy()
         def remove():
             row=chosen()
             if row and messagebox.askyesno('Descartar copia','¿Eliminar esta copia recuperable? Las versiones guardadas se conservan.',parent=win):

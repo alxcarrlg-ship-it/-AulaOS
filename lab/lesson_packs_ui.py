@@ -10,6 +10,7 @@ from online import OpenAIProvider,MeteredProvider
 from lesson_packs import LessonPacks
 from lesson_export import export_presentation
 from document_export import export_document
+from recovery_ui import RecoveryController
 
 class LessonWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -36,6 +37,7 @@ class LessonWindow(tk.Toplevel):
         self.notice=tk.StringVar(value='Revisa coherencia, respuestas y presentación antes de usar. Los cambios requieren guardar.')
         ttk.Label(self,textvariable=self.notice,wraplength=1000).pack(padx=12,pady=6)
         self.refresh();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close);self.poll_id=self.after(100,self.poll)
+        self.recovery=RecoveryController(self,'lesson',self.values,self.recover_text,target=lambda:self.current['id'] if self.current else None,revision=lambda:self.current['revision'] if self.current else None)
     def capture_slide(self):
         if self.current and self.active is not None:self.data['slides'][self.active]=dict(title=self.slide_title.get(),body=self.slide_body.get('1.0','end-1c').splitlines(),notes=self.slide_notes.get('1.0','end-1c'))
     def values(self):
@@ -50,8 +52,13 @@ class LessonWindow(tk.Toplevel):
         if self.dirty() and not messagebox.askyesno('Cambios sin guardar','¿Descartar cambios y abrir el otro paquete?',parent=self):
             self.selector.current(next(i for i,r in enumerate(self.rows) if r['id']==self.current['id']));return
         self.load(self.rows[self.selector.current()]['id'])
+    def recover_text(self,payload,revision):
+        self.data=copy.deepcopy(payload);self.current['revision']=revision;self.display_data()
     def load(self,pid):
-        self.current=self.service.get(self.gid,pid);self.data=copy.deepcopy(self.current['data']);self.saved=copy.deepcopy(self.data);self.active=None
+        if hasattr(self,'recovery'):self.recovery.discard()
+        self.current=self.service.get(self.gid,pid);self.data=copy.deepcopy(self.current['data']);self.saved=copy.deepcopy(self.data);self.display_data()
+    def display_data(self):
+        self.active=None
         self.title_value.set(self.data['title'])
         for k,v in self.texts.items():v.delete('1.0','end');v.insert('1.0',self.data[k])
         self.slides.delete(0,'end')
@@ -67,7 +74,7 @@ class LessonWindow(tk.Toplevel):
         if self.busy or not self.current:return False
         try:revision=self.service.save(self.gid,self.current['id'],self.values(),self.current['revision'])
         except Exception as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return False
-        self.current['revision']=revision;self.saved=copy.deepcopy(self.data);self.notice.set(f'Revisión {revision} guardada.');return True
+        self.current['revision']=revision;self.saved=copy.deepcopy(self.data);self.notice.set(f'Revisión {revision} guardada.');self.recovery.saved();return True
     def export(self,kind):
         if not self.save():return
         suffix='.pptx' if kind=='slides' else '.docx'
@@ -114,4 +121,4 @@ class LessonWindow(tk.Toplevel):
     def try_close(self):
         if self.busy:messagebox.showinfo('Solicitud en curso','Espera a que termine; no hay reintentos automáticos.',parent=self);return False
         if self.dirty() and not messagebox.askyesno('Cambios sin guardar','¿Cerrar y descartar estos cambios?',parent=self):return False
-        self.after_cancel(self.poll_id);self.app.draft_editors.discard(self);self.destroy();return True
+        self.recovery.stop();self.after_cancel(self.poll_id);self.app.draft_editors.discard(self);self.destroy();return True

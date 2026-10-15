@@ -92,7 +92,13 @@ class OpenAIProvider:
             raise classify_http(exc.code, code) from None
         except ssl.SSLError:
             raise OnlineError('security', 'No se pudo verificar la conexión segura con OpenAI.') from None
-        except (URLError, OSError, socket.timeout):
+        except socket.timeout:
+            raise OnlineError('timeout', 'OpenAI no respondió a tiempo. No se reintentó automáticamente; puede haber consumo. Tu conexión podría seguir disponible.') from None
+        except URLError as exc:
+            if isinstance(exc.reason,ssl.SSLError):raise OnlineError('security','No se pudo verificar la conexión segura con OpenAI.') from None
+            if isinstance(exc.reason,socket.timeout):raise OnlineError('timeout','Se agotó la espera. Un reintento puede generar consumo adicional.') from None
+            raise OnlineError('connection','No se completó la conexión. Revisa la red o disponibilidad del servicio antes de reintentar.') from None
+        except OSError:
             raise OnlineError('connection', 'No se pudo completar la conexión con OpenAI. El mensaje quedó guardado; un reintento sería una nueva solicitud y podría generar consumo.') from None
         except (ValueError, TypeError):
             raise OnlineError('protocol', 'OpenAI devolvió una respuesta ilegible. El mensaje quedó guardado.') from None

@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk,messagebox,filedialog
 from evidence import Evidence,STATES,describe
 from document_export import export_document
+from recovery_ui import RecoveryController
 
 class EvidenceWindow(tk.Toplevel):
     def __init__(self,app,gid,pid):
@@ -47,7 +48,7 @@ class EvidenceWindow(tk.Toplevel):
 
 class EvidenceEditor(tk.Toplevel):
     def __init__(self,parent,row):
-        super().__init__(parent);self.owner=parent;self.app=parent.app;self.service=parent.service;self.row=row
+        super().__init__(parent);self.owner=parent;self.app=parent.app;self.gid=parent.gid;self.service=parent.service;self.row=row
         self.project_revision=self.service.projects.get(parent.gid,parent.pid)['revision']
         self.title('Registrar / revisar evidencia');self.geometry('850x750')
         content=row['content'] if row else dict(title='',day=dt.date.today().isoformat(),observation='',next_step='',due='',status=STATES[0])
@@ -71,6 +72,22 @@ class EvidenceEditor(tk.Toplevel):
             ttk.Label(self,text=label).pack(anchor='w',padx=12);box=tk.Text(self,height=5,wrap='word');box.pack(fill='both',expand=True,padx=12);box.insert('1.0',content[key]);self.texts[key]=box
         ttk.Button(self,text='Guardar registro local',command=self.save).pack(pady=10)
         self.original=self.values();self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close)
+        self.recovery=RecoveryController(self,'evidence' if row else 'evidence_new',self.recovery_values,self.recover_text,target=lambda:self.row['id'] if self.row else self.owner.pid,revision=lambda:self.row['revision'] if self.row else self.project_revision)
+    def dirty(self):return self.values()!=self.original
+    def recovery_values(self):
+        student=self.students[self.student.current()] if not self.row else None
+        kind,source_id=self.sources[self.source.current()] if not self.row else ('Sin adjunto',None)
+        return dict(content=self.content(),student_id=student['id'] if student else None,kind=kind,source_id=source_id)
+    def recover_text(self,payload,revision):
+        if self.row:self.row['revision']=revision
+        else:
+            self.project_revision=revision
+            index=next((i for i,s in enumerate(self.students) if (s['id'] if s else None)==payload['student_id']),None)
+            source=(payload['kind'],payload['source_id'])
+            if index is None or source not in self.sources:raise ValueError('Alumno o fuente ya no disponible en esta ventana; vuelve a abrirla.')
+            self.student.current(index);self.source.current(self.sources.index(source))
+        for k,v in self.vars.items():v.set(payload['content'][k])
+        for k,v in self.texts.items():v.delete('1.0','end');v.insert('1.0',payload['content'][k])
     def preview_source(self):
         try:
             if self.row:source=self.row['source']
@@ -90,7 +107,7 @@ class EvidenceEditor(tk.Toplevel):
                 student=self.students[self.student.current()];kind,source_id=self.sources[self.source.current()]
                 self.service.create(self.owner.gid,self.owner.pid,self.project_revision,self.content(),student['id'] if student else None,kind,source_id)
         except Exception as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return
-        self.original=self.values();self.try_close()
+        self.original=self.values();self.recovery.saved();self.try_close()
     def try_close(self):
         if self.values()!=self.original and not messagebox.askyesno('Cambios sin guardar','¿Cerrar y descartar estos cambios?',parent=self):return False
-        self.app.draft_editors.discard(self);self.destroy();return True
+        self.recovery.stop();self.app.draft_editors.discard(self);self.destroy();return True

@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk,messagebox
 from projects import Projects,FIELDS,LABELS,describe
 from evidence_ui import EvidenceWindow
+from recovery_ui import RecoveryController
 
 class ProjectEditor(tk.Toplevel):
     def __init__(self,app,gid,pid=None):
@@ -29,6 +30,11 @@ class ProjectEditor(tk.Toplevel):
         ttk.Button(controls,text='Ver historial',command=self.history).pack(side='left',padx=8)
         ttk.Button(controls,text='Guardar avance',command=self.save).pack(side='right')
         self.app.draft_editors.add(self);self.protocol('WM_DELETE_WINDOW',self.try_close)
+        self.recovery=RecoveryController(self,'project',self.values,self.recover_text,target=lambda:self.pid)
+    def dirty(self):return self.values()!=self.original
+    def recover_text(self,payload,revision):
+        self.revision=revision;self.references=payload['documents'];self.title_value.set(payload['title']);self.refresh_links()
+        for k,v in self.inputs.items():v.delete('1.0','end');v.insert('1.0',payload[k])
     def values(self):return dict(title=self.title_value.get(),documents=list(self.references),**{k:v.get('1.0','end-1c') for k,v in self.inputs.items()})
     def refresh_links(self):
         self.links.delete(0,'end')
@@ -48,10 +54,10 @@ class ProjectEditor(tk.Toplevel):
     def save(self):
         try:self.pid,self.revision=self.service.save(self.gid,self.values(),self.pid,self.revision)
         except Exception as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return
-        self.result=self.pid;self.original=self.values();self.try_close()
+        self.result=self.pid;self.original=self.values();self.recovery.saved();self.try_close()
     def try_close(self):
         if self.values()!=self.original and not messagebox.askyesno('Cambios sin guardar','¿Cerrar y descartar los cambios de esta ventana? El avance ya guardado se conserva.',parent=self):return False
-        self.app.draft_editors.discard(self);self.destroy();return True
+        self.recovery.stop();self.app.draft_editors.discard(self);self.destroy();return True
 
 class HistoryWindow(tk.Toplevel):
     def __init__(self,parent,service,gid,pid):

@@ -12,6 +12,7 @@ from teaching_profiles import missing_details
 from clarifications_ui import ClarificationWindow
 from projects_ui import ProjectEditor
 from projects import describe
+from recovery_ui import RecoveryController
 
 class SuggestionWindow(tk.Toplevel):
     def __init__(self,editor):
@@ -35,6 +36,7 @@ class SuggestionWindow(tk.Toplevel):
         self.use_sources=tk.BooleanVar(value=False)
         ttk.Checkbutton(self,text='Usar los materiales seleccionados para el chat de este grupo (hasta tres)',variable=self.use_sources).pack(anchor='w',padx=12,pady=4)
         ttk.Button(self,text='Revisar texto libre y contradicciones con IA',command=self.review_request).pack(anchor='w',padx=12,pady=4)
+        ttk.Button(self,text='Medir contexto de la planeación guardada',command=self.measure_context).pack(anchor='w',padx=12,pady=3)
         ttk.Button(self,text='Pedir propuesta con OpenAI',command=self.request).pack(anchor='w',padx=12,pady=6)
         self.box=tk.Listbox(self,height=5,exportselection=False);self.box.pack(fill='x',padx=12)
         self.preview=tk.Text(self,wrap='word',state='disabled');self.preview.pack(fill='both',expand=True,padx=12,pady=8)
@@ -101,6 +103,14 @@ class SuggestionWindow(tk.Toplevel):
                 for key,value in accepted.items():text+=key+'\n'+value+'\n\n'
             for source in sources:text+='COPIA DE FUENTE ['+source['source']+'] '+source['title']+'\n'+source['text']+'\n\n'
         self.preview.configure(state='normal');self.preview.delete('1.0','end');self.preview.insert('1.0',text);self.preview.configure(state='disabled')
+    def measure_context(self):
+        try:
+            doc=self.service.templates.document(self.gid,self.did)
+            profile=self.selected_profile();project=self.selected_project()
+            _,_,messages=self.service.context(self.gid,self.did,self.goal.get('1.0','end-1c'),doc['revision'],list(self.app.attachments.get(self.gid,[])) if self.use_sources.get() else [],profile['id'] if profile else None,profile['revision'] if profile else None,project['id'] if project else None,project['revision'] if project else None,enforce_limit=False)
+            size=len(messages[-1]['content'].encode('utf-8'))
+            self.notice.set(f'Contexto: {size:,} / 18,000 bytes UTF-8. '+('Cabe en el límite local.' if size<=18000 else 'Supera el límite: selecciona menos fuentes o fragmentos.')+' No es un conteo de tokens. Usa la planeación guardada; no se envió nada.')
+        except Exception as exc:self.notice.set('No se pudo medir: '+str(exc))
     def request(self):
         if self.busy:return
         if not self.editor.winfo_exists():messagebox.showinfo('Editor cerrado','Abre el documento otra vez para pedir una propuesta sobre su versión actual.',parent=self);return
@@ -149,7 +159,7 @@ class SuggestionWindow(tk.Toplevel):
             if self.editor.changes!=self.editor.saved:messagebox.showinfo('Cambios locales','Guarda tus cambios en el editor antes de continuar. Si cambió la versión, tendrás que pedir una propuesta nueva.',parent=self);return
         if apply:
             dialog=ReviewChanges(self,self.service.review(self.gid,row['id']),lambda keys,edits:self.service.resolve(self.gid,row['id'],True,keys,edits,dialog.draft_revision),
-                self.service.review_draft(self.gid,row['id']),lambda keys,values,version:self.service.save_review(self.gid,row['id'],keys,values,version))
+                self.service.review_draft(self.gid,row['id']),lambda keys,values,version:self.service.save_review(self.gid,row['id'],keys,values,version),row['id'])
             self.wait_window(dialog)
             if dialog.result is None:return
             revision=dialog.result
@@ -172,8 +182,8 @@ class SuggestionWindow(tk.Toplevel):
 
 class ReviewChanges(tk.Toplevel):
     """Local review only; the parent commits the chosen text atomically."""
-    def __init__(self,parent,changes,on_apply,draft,on_save):
-        super().__init__(parent);self.result=None;self.changes=changes;self.active=None;self.on_apply=on_apply
+    def __init__(self,parent,changes,on_apply,draft,on_save,suggestion_id):
+        super().__init__(parent);self.app=parent.app;self.gid=parent.gid;self.suggestion_id=suggestion_id;self.result=None;self.changes=changes;self.active=None;self.on_apply=on_apply
         self.values={c['id']:c['after'] for c in changes};self.included=set(self.values)
         self.on_save=on_save;self.draft_revision=draft['revision'] if draft else 0
         if draft:self.values=dict(draft['values']);self.included=set(draft['selected'])
@@ -195,7 +205,14 @@ class ReviewChanges(tk.Toplevel):
         ttk.Button(controls,text='Cerrar revisión',command=self.cancel).pack(side='left',padx=8)
         self.box.bind('<<ListboxSelect>>',self.select);self.protocol('WM_DELETE_WINDOW',self.cancel)
         if changes:self.box.selection_set(0);self.select()
+        self.recovery=RecoveryController(self,'review',self.recovery_values,self.recover_text,target=lambda:self.suggestion_id,revision=lambda:self.draft_revision)
         self.grab_set()
+    def dirty(self):
+        self.capture();return self.values!=self.saved_values or self.included!=self.saved_included
+    def recovery_values(self):
+        self.capture();return dict(values=dict(self.values),selected=sorted(self.included))
+    def recover_text(self,payload,revision):
+        self.values=dict(payload['values']);self.included=set(payload['selected']);self.draft_revision=revision;self.active=None;self.select()
     def capture(self):
         if self.active is not None:
             self.values[self.active]=self.after_text.get('1.0','end-1c')
@@ -215,13 +232,13 @@ class ReviewChanges(tk.Toplevel):
         keys=[c['id'] for c in self.changes if c['id'] in self.included]
         try:self.result=self.on_apply(keys,{k:self.values[k] for k in keys})
         except Exception as exc:messagebox.showerror('No se aplicó',str(exc),parent=self);return
-        self.destroy()
+        self.recovery.saved();self.recovery.stop();self.destroy()
     def save(self):
         self.capture()
         keys=[c['id'] for c in self.changes if c['id'] in self.included]
         try:self.draft_revision=self.on_save(keys,dict(self.values),self.draft_revision)
         except Exception as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return False
-        self.saved_values=dict(self.values);self.saved_included=set(self.included)
+        self.saved_values=dict(self.values);self.saved_included=set(self.included);self.recovery.saved()
         self.count.set('Revisión guardada para continuar después. El documento aún no cambia.')
         return True
     def cancel(self):
@@ -230,7 +247,7 @@ class ReviewChanges(tk.Toplevel):
             answer=messagebox.askyesnocancel('Guardar revisión','¿Guardar tus correcciones y selección para continuar después? No se aplicarán al documento.',parent=self)
             if answer is None:return
             if answer and not self.save():return
-        self.destroy()
+        self.recovery.stop();self.destroy()
 
 
 class DetailsDialog(tk.Toplevel):
