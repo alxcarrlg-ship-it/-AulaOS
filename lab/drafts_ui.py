@@ -5,6 +5,7 @@ from pathlib import Path
 import webbrowser
 import sqlite3
 from document_export import export_document
+from recovery_ui import RecoveryController
 
 
 class DraftEditor(tk.Toplevel):
@@ -33,7 +34,11 @@ class DraftEditor(tk.Toplevel):
         if did is not None:self.load()
         self.protocol('WM_DELETE_WINDOW',self.try_close)
         app.draft_editors.add(self)
+        self.recovery=RecoveryController(self,'draft',self.recovery_values,self.recover_text)
 
+    def recovery_values(self):return dict(title=self.title_text.get(),content=self.body.get('1.0','end-1c'))
+    def recover_text(self,payload,revision):
+        self.title_text.set(payload['title']);self.body.delete('1.0','end');self.body.insert('1.0',payload['content']);self.revision=revision
     def values(self):return self.title_text.get().strip(),self.body.get('1.0','end-1c').strip()
     def dirty(self):return self.values()!=self.saved
 
@@ -51,6 +56,7 @@ class DraftEditor(tk.Toplevel):
         except (ValueError,OSError,sqlite3.Error) as exc:
             messagebox.showerror('No se guardó',str(exc)+'\nTu texto sigue en el editor. Puedes usar Guardar copia.',parent=self);return False
         self.saved=(title,content);self.notice.set(f'Borrador B{self.did} · versión {self.revision} guardada en este equipo.')
+        self.recovery.saved()
         return True
 
     def save_copy(self):
@@ -59,7 +65,7 @@ class DraftEditor(tk.Toplevel):
         if not title:return
         try:did=self.service.create(self.gid,title,content)
         except (ValueError,sqlite3.Error) as exc:messagebox.showerror('Copia',str(exc),parent=self);return
-        self.did=did;self.load()
+        self.did=did;self.load();self.recovery.saved()
 
     def attach(self):
         if not self.save():return
@@ -119,7 +125,7 @@ class DraftEditor(tk.Toplevel):
             answer=messagebox.askyesnocancel('Cambios sin guardar','¿Guardar antes de cerrar este borrador?',parent=self)
             if answer is None:return False
             if answer and not self.save():return False
-        self.app.draft_editors.discard(self);self.destroy();return True
+        self.recovery.stop();self.app.draft_editors.discard(self);self.destroy();return True
 
 
 def open_drafts(app,gid):

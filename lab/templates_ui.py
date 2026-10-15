@@ -8,6 +8,7 @@ from templates import Templates
 from materials import Materials
 from template_suggestions_ui import SuggestionWindow
 from lesson_packs_ui import LessonWindow
+from recovery_ui import RecoveryController
 
 ERRORS=(ValueError,OSError,sqlite3.Error)
 
@@ -96,6 +97,13 @@ class TemplateEditor(tk.Toplevel):
         ttk.Label(self,textvariable=self.notice,wraplength=940).pack(anchor='w',padx=12,pady=8)
         self.box.bind('<<ListboxSelect>>',self.select);self.box.selection_set(0);self.select()
         self.protocol('WM_DELETE_WINDOW',self.try_close);app.draft_editors.add(self)
+        self.recovery=RecoveryController(self,'template',self.recovery_values,self.recover_text)
+    def dirty(self):
+        self.capture();return self.changes!=self.saved
+    def recovery_values(self):
+        self.capture();return dict(self.changes)
+    def recover_text(self,payload,revision):
+        self.changes=dict(payload);self.revision=revision;self.active=None;self.select()
     def refresh_fields(self):
         self.box.delete(0,'end')
         for f in self.fields:
@@ -129,7 +137,7 @@ class TemplateEditor(tk.Toplevel):
         self.capture()
         try:self.revision=self.service.save(self.gid,self.did,self.changes,self.revision)
         except ERRORS as exc:messagebox.showerror('No se guardó',str(exc),parent=self);return False
-        self.saved=dict(self.changes);self.notice.set(f'Versión {self.revision} guardada localmente.');return True
+        self.saved=dict(self.changes);self.notice.set(f'Versión {self.revision} guardada localmente.');self.recovery.saved();return True
     def copy(self):
         self.capture();doc=self.service.document(self.gid,self.did)
         name=simpledialog.askstring('Guardar copia','Título:',initialvalue=doc['title']+' — copia',parent=self)
@@ -171,4 +179,4 @@ class TemplateEditor(tk.Toplevel):
         if self.changes!=self.saved:
             answer=messagebox.askyesnocancel('Cambios sin guardar','¿Guardar antes de cerrar?',parent=self)
             if answer is None or answer and not self.save():return False
-        self.app.draft_editors.discard(self);self.destroy();return True
+        self.recovery.stop();self.app.draft_editors.discard(self);self.destroy();return True
